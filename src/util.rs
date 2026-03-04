@@ -86,6 +86,7 @@ pub fn to_patches(ast: &DeriveInput,) -> (Body, BodyIdent,) {
 
         impl mae::repo::__private__::BindArgs for #body_ident {
             fn bind(&self, mut args: &mut sqlx::postgres::PgArguments) {
+                use sqlx::Arguments;
                 let _ = match self {
                     #(#to_arg,)*
                 };
@@ -287,6 +288,7 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyI
 
         impl mae::repo::__private__::BindArgs for #body_ident {
             fn bind(&self, mut args: &mut sqlx::postgres::PgArguments) {
+                use sqlx::Arguments;
                 #(#bind_some)*
             }
             fn bind_len(&self) -> usize {
