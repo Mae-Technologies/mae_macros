@@ -140,7 +140,7 @@ pub fn schema(args: TokenStream, input: TokenStream,) -> TokenStream {
             #[locked]
             pub updated_at: chrono::DateTime<chrono::Utc>,
         }
-        impl mae::repo::__private__::Build<#ctx, InsertRow, Field, PatchField> for #repo_ident {
+        impl mae::repo::__private__::Build<#ctx, InsertRow, UpdateRow, Field, PatchField> for #repo_ident {
             fn schema() -> String {
                 #schema.to_string()
             }
