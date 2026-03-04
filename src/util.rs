@@ -40,8 +40,7 @@ pub fn to_patches(ast: &DeriveInput,) -> (Body, BodyIdent,) {
         if let Ok(name_ident,) = name_ident
             && f.attrs
                 .iter()
-                .map(|a| !a.path().is_ident("locked",) && !a.path().is_ident("insert_only",),)
-                .all(|a| a == true,)
+                .all(|a| !a.path().is_ident("locked",) && !a.path().is_ident("insert_only",),)
         {
             let ty = &f.ty;
             let name_str = name_ident.to_string();
@@ -188,7 +187,7 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyI
     };
 
     let is_insert_row = attr_black_list.contains(&"update_only".to_string(),);
-    let is_update_row = !is_insert_row;
+    let _is_update_row = !is_insert_row;
 
     let body_ident = if is_insert_row {
         quote! { InsertRow}
@@ -210,12 +209,7 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyI
 
         // we need to check if either there are no attrs, or if attr != locked | != insert_only
         if let Ok(name_ident,) = name_ident
-            && f.attrs
-                .iter()
-                .map(|a| {
-                    attr_black_list.iter().map(|abl| !a.path().is_ident(abl,),).all(|a| a == true,)
-                },)
-                .all(|a| a == true,)
+            && f.attrs.iter().all(|a| attr_black_list.iter().all(|abl| !a.path().is_ident(abl,),),)
         {
             let ty = &f.ty;
             if is_insert_row {
@@ -310,6 +304,7 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyI
 }
 
 // Utils to find various attributes
+#[allow(dead_code)]
 fn find_get_attr(field: &Field, attr_name: &'static str,) -> Option<syn::Ident,> {
     let Some(ident,) = field.ident.clone() else {
         return None; // ignore tuple fields
@@ -323,6 +318,7 @@ fn find_get_attr(field: &Field, attr_name: &'static str,) -> Option<syn::Ident,>
 
     None
 }
+#[allow(dead_code)]
 fn find_get_attr_with_args(
     field: &Field,
     attr_name: &'static str,
