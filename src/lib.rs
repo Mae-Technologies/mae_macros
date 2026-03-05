@@ -149,6 +149,69 @@ pub fn schema(args: TokenStream, input: TokenStream,) -> TokenStream {
     repo.into()
 }
 
+/// Like `#[schema]` but omits the auto-injected `sys_client` field.
+/// Use this for the `sys_client` table itself, which has no FK back to itself.
+#[proc_macro_attribute]
+pub fn schema_root(args: TokenStream, input: TokenStream,) -> TokenStream {
+    let Args { ctx, schema, .. } = parse_macro_input!(args as Args);
+    let ast = parse_macro_input!(input as DeriveInput);
+
+    let repo_ident = &ast.ident;
+    let repo_attrs = &ast.attrs;
+
+    let fields = match ast.data {
+        Struct(DataStruct { fields: Named(FieldsNamed { ref named, .. },), .. },) => named,
+        _ => {
+            return syn::Error::new_spanned(
+                repo_ident,
+                "schema_root only works for structs with named fields",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+
+    let params = fields.iter().map(|f| {
+        let name = &f.ident;
+        let ty = &f.ty;
+        let attrs = &f.attrs;
+        quote! {
+            #(#attrs)*
+            pub #name: #ty
+        }
+    },);
+
+    let repo = quote! {
+        #(#repo_attrs)*
+        #[derive(mae_macros::MaeRepo, Debug, sqlx::FromRow, serde::Serialize, serde::Deserialize, Clone)]
+        pub struct #repo_ident {
+            #[locked]
+            pub id: i32,
+            pub status: mae::repo::default::DomainStatus,
+            #(#params,)*
+            pub comment: Option<String>,
+            #[sqlx(json)]
+            pub tags: serde_json::Value,
+            #[sqlx(json)]
+            pub sys_detail: serde_json::Value,
+            #[locked]
+            pub created_by: i32,
+            #[locked]
+            pub updated_by: i32,
+            #[locked]
+            pub created_at: chrono::DateTime<chrono::Utc>,
+            #[locked]
+            pub updated_at: chrono::DateTime<chrono::Utc>,
+        }
+        impl mae::repo::__private__::Build<#ctx, InsertRow, UpdateRow, Field, PatchField> for #repo_ident {
+            fn schema() -> String {
+                #schema.to_string()
+            }
+        }
+    };
+    repo.into()
+}
+
 #[proc_macro_derive(MaeRepo, attributes(from_context, insert_only, update_only, locked))]
 pub fn derive_mae_repo(item: TokenStream,) -> TokenStream {
     let ast = parse_macro_input!(item as DeriveInput);
