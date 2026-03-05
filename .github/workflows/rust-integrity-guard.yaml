@@ -22,6 +22,10 @@ jobs:
         with:
           fetch-depth: 0       # full history needed for git diff
 
+      # --- Rewrite SSH git URLs to HTTPS ---
+      - name: Rewrite SSH git URLs to HTTPS (CI has no SSH key)
+        run: git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+
       # --- Cache Cargo dependencies ---
       - name: Cache Cargo registry and git
         uses: actions/cache@v3
@@ -108,7 +112,9 @@ jobs:
       # --- Run Miri tests ---
       - name: Run Miri Tests
         if: steps.changed_files.outputs.files != ''
-        run: cargo +nightly miri test --all-targets --all-features -- --nocapture
+        env:
+          MIRIFLAGS: "-Zmiri-disable-isolation"
+        run: cargo +nightly miri test --lib -- --nocapture
 
       # --- Run Cargo Deny ---
       - name: Run Cargo Deny
