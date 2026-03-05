@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Only run in interactive shells
+if [[ ! -t 1 ]]; then
+  exit 0
+fi
+
+# If we reach here → proceed with template or client logic
+
+########################################
+# Colors
+########################################
+RED="\033[0;31m"
+GREEN="\033[0;32m"
+YELLOW="\033[0;33m"
+BLUE="\033[0;34m"
+BOLD="\033[1m"
+RESET="\033[0m"
+
+info() { printf "${BLUE}%s${RESET}\n" "$*"; }
+ok() { printf "${GREEN}%s${RESET}\n" "$*"; }
+warn() { printf "${YELLOW}%s${RESET}\n" "$*"; }
+err() { printf "${RED}%s${RESET}\n" "$*" >&2; }
+
+# ────────────────────────────────────────────────
+# Only run logic when on main or master
+# ────────────────────────────────────────────────
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+
+if [[ "$CURRENT_BRANCH" != "main" && "$CURRENT_BRANCH" != "master" ]]; then
+  # Optional: show a quiet message (comment out if you want zero output on feature branches)
+  info "Not on main/master (on $CURRENT_BRANCH) → skipping pre-commit check"
+  exit 0
+fi
+
+########################################
+# Config
+########################################
+TEMPLATE_FILE=".rust_template_version"
+TEMPLATE_REMOTE="https://github.com/MrCartaaa/rust_template.git"
+TEMPLATE_SSH="git@github.com:MrCartaaa/rust_template.git"
+TEMPLATE_BRANCH="main"
+
+CURRENT_REMOTE_URL=$(git remote get-url origin 2>/dev/null || true)
+IS_TEMPLATE_REPO=false
+if [[ "$CURRENT_REMOTE_URL" == "$TEMPLATE_REMOTE" ]] || [[ "$CURRENT_REMOTE_URL" == "$TEMPLATE_SSH" ]]; then
+  IS_TEMPLATE_REPO=true
+fi
+
+# Ensure version file exists
+if [[ ! -f "$TEMPLATE_FILE" ]]; then
+  err "❌ ERROR: $TEMPLATE_FILE not found."
+  exit 1
+fi
+
+CURRENT_SHA=$(tr -d ' \r\n' <"$TEMPLATE_FILE")
+
+########################################
+# TEMPLATE REPO LOGIC
+########################################
+if [[ "$IS_TEMPLATE_REPO" == true ]]; then
+  if git show HEAD:"$TEMPLATE_FILE" >/dev/null 2>&1; then
+    PREV_SHA=$(git show HEAD:"$TEMPLATE_FILE" | tr -d ' \r\n')
+  else
+    PREV_SHA=""
+  fi
+
+  if [[ "$CURRENT_SHA" == "$PREV_SHA" ]]; then
+    info "📝  Bumping template version marker…"
+    NEW_SHA=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || openssl rand -hex 16)
+    echo "$NEW_SHA" | tr -d '\r' >"$TEMPLATE_FILE"
+    git add "$TEMPLATE_FILE"
+    ok "⚠️  Template version updated to: $NEW_SHA  "
+    info "Included in current commit automatically."
+  fi
+
+  exit 0
+fi
+
+########################################
+# CLIENT REPO LOGIC
+########################################
+info "[⏱ ] Checking remote for rust template version"
+
+TMP_REF="refs/remotes/_template_tmp"
+
+# Spinner in background while fetch runs
+(
+  git fetch --quiet "$TEMPLATE_REMOTE" "$TEMPLATE_BRANCH:$TMP_REF"
+) &
+FETCH_PID=$!
+
+SPINNER="/-\|"
+while kill -0 $FETCH_PID 2>/dev/null; do
+  for c in $SPINNER; do
+    printf "\r[⏱ ] Fetching template %s" "$c"
+    sleep 0.1
+  done
+done
+wait $FETCH_PID
+
+printf "\r[⏱ ] Fetch complete ✔        \n"
+
+REMOTE_FILE_SHA=$(git show "$TMP_REF:$TEMPLATE_FILE" 2>/dev/null | tr -d ' \r\n' || true)
+
+# Cleanup temporary ref
+git update-ref -d "$TMP_REF" >/dev/null 2>&1 || true
+
+if [[ -z "$REMOTE_FILE_SHA" ]]; then
+  err "❌ ERROR: Could not read $TEMPLATE_FILE from template remote $TEMPLATE_BRANCH"
+  exit 1
+fi
+
+if [[ "$CURRENT_SHA" != "$REMOTE_FILE_SHA" ]]; then
+  err "❌ Template version mismatch — commit blocked"
+  info "Latest template .rust_template_version : $REMOTE_FILE_SHA"
+  info "Your project expects                  : $CURRENT_SHA"
+  info "Run sync_rust_template.sh to update before committing."
+  exit 1
+fi
+
+dir="${RUST_TEMPLATE_DIR:-}"
+if [[ -z "$dir" ]]; then
+  err "❌ ERROR: RUST_TEMPLATE_DIR is not set"
+  exit 1
+fi
+if [[ ! -d "$dir" ]]; then
+  err "❌ ERROR: RUST_TEMPLATE_DIR does not exist: $dir"
+  exit 1
+fi
+if [[ ! -d "$dir/.git" ]]; then
+  err "❌ ERROR: RUST_TEMPLATE_DIR is not a git repo: $dir"
+  exit 1
+fi
+
+# Check status (includes staged, unstaged, untracked)
+if [[ -n "$(git -C "$dir" status --porcelain)" ]]; then
+  err "❌ ERROR: template working tree is not clean: $dir"
+  info "   - commit and push your changes in the rust_template project before continuing"
+  exit 1
+fi
+
+ok "✔ Template version OK ($CURRENT_SHA)"
+exit 0
