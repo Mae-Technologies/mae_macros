@@ -243,17 +243,110 @@ pub fn derive_mae_repo(item: TokenStream,) -> TokenStream {
     .into()
 }
 
-/// Expands:
-/// #[test]
-/// async fn foo() { ... }
+// ── #[mae_test] attribute arguments ──────────────────────────────────────────
+
+/// Parsed arguments for `#[mae_test(...)]`.
 ///
-/// into:
-/// #[allow(clippy::disallowed_methods)]
-/// #[tokio::test(flavor = "multi_thread")]
-/// async fn foo() { ... }
+/// Supported forms:
+/// - `#[mae_test]`                              — basic async test
+/// - `#[mae_test(docker)]`                      — skip unless `MAE_TESTCONTAINERS=1` at compile time
+/// - `#[mae_test(teardown = path::to::fn)]`     — call async teardown fn after the test body
+/// - `#[mae_test(docker, teardown = path)]`     — both
+struct MaeTestArgs {
+    docker: bool,
+    teardown: Option<syn::ExprPath,>,
+}
+
+impl Parse for MaeTestArgs {
+    fn parse(input: ParseStream<'_,>,) -> syn::Result<Self,> {
+        let mut docker = false;
+        let mut teardown = None;
+
+        while !input.is_empty() {
+            let ident: syn::Ident = input.parse()?;
+            match ident.to_string().as_str() {
+                "docker" => docker = true,
+                "teardown" => {
+                    input.parse::<Token![=]>()?;
+                    teardown = Some(input.parse::<syn::ExprPath>()?,);
+                }
+                other => {
+                    return Err(syn::Error::new_spanned(
+                        ident,
+                        format!(
+                            "unknown #[mae_test] argument: `{other}`; expected `docker` or `teardown = <path>`"
+                        ),
+                    ),);
+                }
+            }
+            if input.peek(Token![,],) {
+                let _: Token![,] = input.parse()?;
+            }
+        }
+
+        Ok(Self { docker, teardown, },)
+    }
+}
+
+/// `#[mae_test]` — the standard macro for async journey tests in Mae services.
+///
+/// # What it does
+///
+/// Wraps an `async fn` test in a dedicated multi-threaded Tokio runtime, enforces the
+/// Mae test-hygiene rules (no raw `.unwrap()` / `.expect()` / `assert*!` in test bodies),
+/// and optionally:
+/// - gates the test on `MAE_TESTCONTAINERS=1` at compile time (`docker` flag)
+/// - runs an async teardown function after the test body (`teardown = path` argument)
+///
+/// # Attributes
+///
+/// | Argument | Effect |
+/// |---|---|
+/// | _(none)_ | Basic multi-threaded async test |
+/// | `docker` | Skips test unless compiled with `MAE_TESTCONTAINERS=1` |
+/// | `teardown = crate::common::context::teardown` | Calls given async fn after test, even on panic |
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// use mae_macros::mae_test;
+///
+/// // Good: returns Result, uses `?` and `must::*` helpers
+/// #[mae_test]
+/// async fn journey_create_user() -> Result<(), anyhow::Error> {
+///     let ctx = TestContext::new().await?;
+///     let user = ctx.create_user("alice").await?;
+///     must_eq(user.name, "alice");
+///     Ok(())
+/// }
+///
+/// // Docker-gated: only runs when MAE_TESTCONTAINERS=1 cargo test
+/// #[mae_test(docker)]
+/// async fn journey_with_postgres() -> Result<(), anyhow::Error> {
+///     let ctx = TestContext::new().await?;
+///     // ... test using real DB
+///     Ok(())
+/// }
+///
+/// // With explicit teardown
+/// #[mae_test(teardown = crate::common::context::teardown)]
+/// async fn journey_with_cleanup() -> Result<(), anyhow::Error> {
+///     let ctx = TestContext::setup().await?;
+///     ctx.do_work().await?;
+///     Ok(())
+/// }
+///
+/// // Bad: uses raw .unwrap() — compile error
+/// #[mae_test]
+/// async fn bad_test() {
+///     let x: Option<i32> = None;
+///     let _ = x.unwrap(); // ❌ compile error: forbidden
+/// }
+/// ```
 #[proc_macro_attribute]
-#[allow(clippy::replace_box)]
-pub fn mae_test(_attr: TokenStream, item: TokenStream,) -> TokenStream {
+pub fn mae_test(attr: TokenStream, item: TokenStream,) -> TokenStream {
+    let MaeTestArgs { docker, teardown, } = parse_macro_input!(attr as MaeTestArgs);
+
     let mut f = match syn::parse::<syn::ItemFn,>(item,) {
         Ok(f,) => f,
         Err(_,) => {
@@ -306,23 +399,68 @@ pub fn mae_test(_attr: TokenStream, item: TokenStream,) -> TokenStream {
         syn::ReturnType::Type(_, ty,) => (**ty).clone(),
     };
 
+    // ---- docker gate: skip unless MAE_TESTCONTAINERS=1 was set at compile time ----
+    // Uses `option_env!` so the check is baked in at compile time; no runtime overhead.
+    let docker_gate = if docker {
+        // Generate early-return based on whether the function returns () or a Result/other type.
+        let early_return: proc_macro2::TokenStream = match &f.sig.output {
+            syn::ReturnType::Default => quote! { return; },
+            syn::ReturnType::Type(..,) => {
+                // For Result<(), E> (the common case) this expands to Ok(()).
+                // Requires the success type to implement Default; document this constraint.
+                quote! { return ::core::result::Result::Ok(::core::default::Default::default()); }
+            }
+        };
+        quote! {
+            if ::std::option_env!("MAE_TESTCONTAINERS") != ::core::option::Option::Some("1") {
+                // docker-gated test — recompile with `MAE_TESTCONTAINERS=1 cargo test` to run
+                #early_return
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    // ---- optional teardown call ----
+    let teardown_call = match teardown {
+        Some(ref td_path,) => quote! {
+            let __teardown_result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
+                __mae_rt.block_on(async move {
+                    #td_path().await;
+                })
+            }));
+        },
+        None => quote! {
+            let __teardown_result: ::std::result::Result<(), Box<dyn ::std::any::Any + Send>> = Ok(());
+        },
+    };
+
     // Ensure the outer test function is synchronous; we drive an async block ourselves.
     f.sig.asyncness = None;
 
-    // Outer test function gets ONLY #[test] (no clippy allow here).
-    // Preserve other attrs the user may have added (doc cfg etc.).
+    // Outer test function gets ONLY #[test] (plus any attrs the user already had, e.g. #[ignore]).
     f.attrs.insert(0, syn::parse_quote!(#[test]),);
 
-    // Generate body: inner helper has the clippy allow, and ONLY contains runtime + teardown.
-    f.block = Box::new(syn::parse_quote!({
-        #[allow(clippy::disallowed_methods)]
+    // Generate body.
+    //
+    // The inner `__mae_run_test` carries `#[allow(clippy::disallowed_methods,
+    // clippy::expect_used)]` because it builds the Tokio runtime via the builder API which
+    // requires `.build()` — a fallible operation we must handle; we do so with a match rather
+    // than `.expect()`, but the allow covers any edge cases in generated code.
+    *f.block = syn::parse_quote!({
+        #[allow(clippy::disallowed_methods, clippy::expect_used)]
         fn __mae_run_test() -> #ret_ty {
-            let __mae_rt = tokio::runtime::Builder::new_multi_thread()
+            #docker_gate
+
+            let __mae_rt = match ::tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
-                .expect("failed to build tokio runtime for #[mae_test]");
+            {
+                Ok(rt,) => rt,
+                Err(e,) => panic!("failed to build tokio runtime for #[mae_test]: {e}"),
+            };
 
-            let __user_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let __user_result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
                 __mae_rt.block_on(async move {
                     // run user test body
                     (async move #orig_block).await
@@ -330,28 +468,24 @@ pub fn mae_test(_attr: TokenStream, item: TokenStream,) -> TokenStream {
             }));
 
             // Always attempt teardown, even if the user body panicked.
-            let __teardown_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                __mae_rt.block_on(async move {
-                    crate::common::context::teardown().await;
-                })
-            }));
+            #teardown_call
 
             match (__user_result, __teardown_result) {
                 (Ok(__ret), Ok(())) => __ret,
 
                 // User panicked; teardown succeeded -> rethrow original panic
-                (Err(__panic), Ok(())) => std::panic::resume_unwind(__panic),
+                (Err(__panic), Ok(())) => ::std::panic::resume_unwind(__panic),
 
                 // User succeeded; teardown panicked -> surface teardown panic
-                (Ok(_), Err(__panic)) => std::panic::resume_unwind(__panic),
+                (Ok(_), Err(__panic)) => ::std::panic::resume_unwind(__panic),
 
                 // Both panicked -> prefer original user panic (teardown panic would mask test failure)
-                (Err(__panic), Err(_teardown_panic)) => std::panic::resume_unwind(__panic),
+                (Err(__panic), Err(_teardown_panic)) => ::std::panic::resume_unwind(__panic),
             }
         }
 
         __mae_run_test()
-    }),);
+    });
 
     TokenStream::from(quote::quote!(#f),)
 }
