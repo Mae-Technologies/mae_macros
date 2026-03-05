@@ -86,7 +86,7 @@ impl Parse for Args {
         let _comma = input.parse()?;
         let schema = input.parse()?;
         // Optional trailing `, no_sys_client`
-        let no_sys_client = if input.peek(Token![,],) {
+        let no_sys_client = if !input.is_empty() {
             let _: Token![,] = input.parse()?;
             let flag: Ident = input.parse()?;
             flag == "no_sys_client"
