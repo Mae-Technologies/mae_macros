@@ -73,33 +73,17 @@ struct Args {
     ctx: Ident,
     schema: LitStr,
     _comma: Token![,],
-    /// When set via `#[schema(Ctx, "table", no_sys_client)]`, omits the
-    /// auto-injected `sys_client` field from the generated struct.
-    /// Use this for tables that *are* the sys_client (i.e. the `sys_client`
-    /// table itself), which have no FK back to themselves.
-    no_sys_client: bool,
 }
 
 impl Parse for Args {
     fn parse(input: ParseStream<'_,>,) -> syn::Result<Self,> {
-        let ctx = input.parse()?;
-        let _comma = input.parse()?;
-        let schema = input.parse()?;
-        // Optional trailing `, no_sys_client`
-        let no_sys_client = if !input.is_empty() {
-            let _: Token![,] = input.parse()?;
-            let flag: Ident = input.parse()?;
-            flag == "no_sys_client"
-        } else {
-            false
-        };
-        Ok(Self { ctx, _comma, schema, no_sys_client, },)
+        Ok(Self { ctx: input.parse()?, _comma: input.parse()?, schema: input.parse()?, },)
     }
 }
 
 #[proc_macro_attribute]
 pub fn schema(args: TokenStream, input: TokenStream,) -> TokenStream {
-    let Args { ctx, schema, no_sys_client, .. } = parse_macro_input!(args as Args);
+    let Args { ctx, schema, .. } = parse_macro_input!(args as Args);
     let ast = parse_macro_input!(input as DeriveInput);
 
     let repo_ident = &ast.ident;
@@ -129,16 +113,6 @@ pub fn schema(args: TokenStream, input: TokenStream,) -> TokenStream {
         }
     },);
 
-    // Optionally include the sys_client field (omitted for the sys_client table itself).
-    let sys_client_field = if no_sys_client {
-        quote! {}
-    } else {
-        quote! {
-            #[insert_only]
-            pub sys_client: i32,
-        }
-    };
-
     // rebuild repo struct with the existing fields and default fields for the repo
     // NOTE: here, we are deriving the Repo with the proc_macro_derive fn from above
     let repo = quote! {
@@ -148,7 +122,71 @@ pub fn schema(args: TokenStream, input: TokenStream,) -> TokenStream {
         pub struct #repo_ident {
             #[locked]
             pub id: i32,
-            #sys_client_field
+            #[insert_only]
+            pub sys_client: i32,
+            pub status: mae::repo::default::DomainStatus,
+            #(#params,)*
+            pub comment: Option<String>,
+            #[sqlx(json)]
+            pub tags: serde_json::Value,
+            #[sqlx(json)]
+            pub sys_detail: serde_json::Value,
+            #[locked]
+            pub created_by: i32,
+            #[locked]
+            pub updated_by: i32,
+            #[locked]
+            pub created_at: chrono::DateTime<chrono::Utc>,
+            #[locked]
+            pub updated_at: chrono::DateTime<chrono::Utc>,
+        }
+        impl mae::repo::__private__::Build<#ctx, InsertRow, UpdateRow, Field, PatchField> for #repo_ident {
+            fn schema() -> String {
+                #schema.to_string()
+            }
+        }
+    };
+    repo.into()
+}
+
+/// Like `#[schema]` but omits the auto-injected `sys_client` field.
+/// Use this for the `sys_client` table itself, which has no FK back to itself.
+#[proc_macro_attribute]
+pub fn schema_root(args: TokenStream, input: TokenStream,) -> TokenStream {
+    let Args { ctx, schema, .. } = parse_macro_input!(args as Args);
+    let ast = parse_macro_input!(input as DeriveInput);
+
+    let repo_ident = &ast.ident;
+    let repo_attrs = &ast.attrs;
+
+    let fields = match ast.data {
+        Struct(DataStruct { fields: Named(FieldsNamed { ref named, .. },), .. },) => named,
+        _ => {
+            return syn::Error::new_spanned(
+                repo_ident,
+                "schema_root only works for structs with named fields",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+
+    let params = fields.iter().map(|f| {
+        let name = &f.ident;
+        let ty = &f.ty;
+        let attrs = &f.attrs;
+        quote! {
+            #(#attrs)*
+            pub #name: #ty
+        }
+    },);
+
+    let repo = quote! {
+        #(#repo_attrs)*
+        #[derive(mae_macros::MaeRepo, Debug, sqlx::FromRow, serde::Serialize, serde::Deserialize, Clone)]
+        pub struct #repo_ident {
+            #[locked]
+            pub id: i32,
             pub status: mae::repo::default::DomainStatus,
             #(#params,)*
             pub comment: Option<String>,
