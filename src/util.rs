@@ -4,14 +4,6 @@ use syn::{Data, DataStruct, DeriveInput, Field, Fields, LitStr};
 type Body = proc_macro2::TokenStream;
 type BodyIdent = proc_macro2::TokenStream;
 
-// TODO:
-// Impl EnumIter for Fields -> this is to generate randomness for tests
-// If there is a flag #[test] at the top of the repo struct to impl a randomness generator
-// From impl:
-// impl Patch -> Field
-// impl Patch => Filter
-// impl Row => Filter
-
 pub fn to_patches(ast: &DeriveInput,) -> (Body, BodyIdent,) {
     let fields = match &ast.data {
         Data::Struct(DataStruct { fields: Fields::Named(fields,), .. },) => &fields.named,
@@ -29,6 +21,8 @@ pub fn to_patches(ast: &DeriveInput,) -> (Body, BodyIdent,) {
     let mut typed_enum = vec![];
     let body_ident = quote! { PatchField };
     let mut debug_bindings = vec![];
+    let mut patch_to_field_arms = vec![];
+    let mut patch_to_filter_arms = vec![];
 
     fields.iter().for_each(|f| {
         let name_ident = f.ident.as_ref().ok_or_else(|| {
@@ -57,6 +51,17 @@ pub fn to_patches(ast: &DeriveInput,) -> (Body, BodyIdent,) {
             },);
 
             typed_enum.push(quote! { #name_ident(#ty) },);
+
+            patch_to_field_arms.push(quote! {
+                #body_ident::#name_ident(_) => Field::#name_ident
+            },);
+
+            patch_to_filter_arms.push(quote! {
+                #body_ident::#name_ident(v) => mae::repo::filter::FilterOp::Begin(
+                    Field::#name_ident,
+                    v.into_mae_filter(),
+                )
+            },);
         }
     },);
 
@@ -103,6 +108,31 @@ pub fn to_patches(ast: &DeriveInput,) -> (Body, BodyIdent,) {
                 }
             }
         }
+
+        /// Convert a [`PatchField`] variant into its corresponding [`Field`],
+        /// discarding the contained value.
+        impl From<#body_ident> for Field {
+            fn from(patch: #body_ident) -> Field {
+                match patch {
+                    #(#patch_to_field_arms,)*
+                }
+            }
+        }
+
+        /// Convert a [`PatchField`] variant into a [`FilterOp<Field>`] using an
+        /// equality condition (`Begin … Equals / StringIs`).
+        ///
+        /// Relies on [`mae::repo::__private__::IntoMaeFilter`] which is
+        /// implemented for the primitive types (`i32`, `String`, and their
+        /// `Option` wrappers) that appear in schema field definitions.
+        impl From<#body_ident> for mae::repo::filter::FilterOp<Field> {
+            fn from(patch: #body_ident) -> mae::repo::filter::FilterOp<Field> {
+                use mae::repo::__private__::IntoMaeFilter;
+                match patch {
+                    #(#patch_to_filter_arms,)*
+                }
+            }
+        }
     };
     (body, body_ident,)
 }
@@ -122,6 +152,7 @@ pub fn to_fields(ast: &DeriveInput,) -> (Body, BodyIdent,) {
     let mut all_cols: Vec<String,> = Vec::new();
     let mut to_string_arms: Vec<proc_macro2::TokenStream,> = Vec::new();
     let mut variants: Vec<proc_macro2::TokenStream,> = Vec::new();
+    let mut iter_variants: Vec<proc_macro2::TokenStream,> = Vec::new();
 
     let body_ident = quote! { Field };
 
@@ -143,6 +174,7 @@ pub fn to_fields(ast: &DeriveInput,) -> (Body, BodyIdent,) {
         },);
 
         variants.push(quote! { #name },);
+        iter_variants.push(quote! { #body_ident::#name },);
     }
 
     let all_cols_str = all_cols.join(", ",);
@@ -153,6 +185,17 @@ pub fn to_fields(ast: &DeriveInput,) -> (Body, BodyIdent,) {
         pub enum #body_ident {
             All,
             #(#variants,)*
+        }
+
+        impl #body_ident {
+            /// Returns an iterator over every concrete [`Field`] variant
+            /// (excludes [`Field::All`]).
+            ///
+            /// Useful for test-data generation and introspection of the
+            /// full column set.
+            pub fn iter() -> impl Iterator<Item = #body_ident> {
+                [#(#iter_variants,)*].into_iter()
+            }
         }
 
         impl mae::repo::__private__::ToSqlParts for #body_ident {
@@ -200,6 +243,7 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyI
     let mut bind_some = vec![];
     let mut bind_len = vec![];
     let mut debug_bindings = vec![];
+    let mut row_to_filter_arms = vec![];
 
     fields.iter().for_each(|f| {
         let name_ident = f.ident.as_ref().ok_or_else(|| {
@@ -231,7 +275,19 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyI
                 debug_bindings.push(quote! {
                     sql_i += 1;
                     write!(f, "\n\t${} = {:?}", sql_i, &self.#name_ident)?;
-                },)
+                },);
+
+                row_to_filter_arms.push(quote! {
+                    {
+                        use mae::repo::__private__::IntoMaeFilter;
+                        let filter = row.#name_ident.clone().into_mae_filter();
+                        if out.is_empty() {
+                            out.push(mae::repo::filter::FilterOp::Begin(Field::#name_ident, filter,),);
+                        } else {
+                            out.push(mae::repo::filter::FilterOp::And(Field::#name_ident, filter,),);
+                        }
+                    }
+                },);
             } else {
                 props.push(quote! { pub #name_ident: Option<#ty> },);
 
@@ -257,6 +313,18 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyI
                         sql_i += 1;
                         write!(f, "\n\t${} = {:?}", sql_i, v)?;
                     };
+                },);
+
+                row_to_filter_arms.push(quote! {
+                    if let Some(v) = row.#name_ident.clone() {
+                        use mae::repo::__private__::IntoMaeFilter;
+                        let filter = v.into_mae_filter();
+                        if out.is_empty() {
+                            out.push(mae::repo::filter::FilterOp::Begin(Field::#name_ident, filter,),);
+                        } else {
+                            out.push(mae::repo::filter::FilterOp::And(Field::#name_ident, filter,),);
+                        }
+                    }
                 },);
             }
         }
@@ -297,6 +365,22 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyI
                 let mut sql_i = 0;
                 #(#debug_bindings)*
                 std::fmt::Result::Ok(())
+            }
+        }
+
+        /// Convert a row into a list of [`FilterOp<Field>`] conditions.
+        ///
+        /// For [`InsertRow`] every field becomes a filter condition.
+        /// For [`UpdateRow`] only the `Some` fields are emitted; `None`
+        /// fields are skipped so callers can build partial WHERE clauses.
+        ///
+        /// The first condition uses [`FilterOp::Begin`]; subsequent ones
+        /// use [`FilterOp::And`].
+        impl From<#body_ident> for Vec<mae::repo::filter::FilterOp<Field>> {
+            fn from(row: #body_ident) -> Vec<mae::repo::filter::FilterOp<Field>> {
+                let mut out: Vec<mae::repo::filter::FilterOp<Field>> = vec![];
+                #(#row_to_filter_arms)*
+                out
             }
         }
     };
