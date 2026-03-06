@@ -46,7 +46,7 @@ pub fn to_patches(ast: &DeriveInput,) -> (Body, BodyIdent,) {
             let name_str = name_ident.to_string();
 
             to_arg.push(quote! {
-                #body_ident::#name_ident(arg) => args.add(arg)
+                #body_ident::#name_ident(arg) => args.add(arg).map_err(|e| anyhow::anyhow!("{}", e))
             },);
             to_string.push(quote! {
                 #body_ident::#name_ident(_) => #name_str.to_string()
@@ -84,11 +84,12 @@ pub fn to_patches(ast: &DeriveInput,) -> (Body, BodyIdent,) {
         }
 
         impl mae::repo::__private__::BindArgs for #body_ident {
-            fn bind(&self, mut args: &mut sqlx::postgres::PgArguments) {
+            fn bind(&self, mut args: &mut sqlx::postgres::PgArguments) -> Result<(), anyhow::Error> {
                 use sqlx::Arguments;
-                let _ = match self {
+                match self {
                     #(#to_arg,)*
-                };
+                }?;
+                Ok(())
             }
             fn bind_len(&self) -> usize {
                 // NOTE: There will always be one arg for a PatchField
@@ -226,7 +227,7 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyI
                         count += 1;
                 },);
                 bind_some.push(quote! {
-                    let _ = args.add(&self.#name_ident);
+                    args.add(&self.#name_ident).map_err(|e| anyhow::anyhow!("{}", e))?;
                 },);
                 debug_bindings.push(quote! {
                     sql_i += 1;
@@ -250,7 +251,7 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyI
                 },);
                 bind_some.push(quote! {
                 if let Some(v) = &self.#name_ident {
-                    let _ = args.add(v);
+                    args.add(v).map_err(|e| anyhow::anyhow!("{}", e))?;
                 };},);
                 debug_bindings.push(quote! {
                     if let Some(v) = &self.#name_ident {
@@ -281,9 +282,10 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyI
         }
 
         impl mae::repo::__private__::BindArgs for #body_ident {
-            fn bind(&self, mut args: &mut sqlx::postgres::PgArguments) {
+            fn bind(&self, mut args: &mut sqlx::postgres::PgArguments) -> Result<(), anyhow::Error> {
                 use sqlx::Arguments;
                 #(#bind_some)*
+                Ok(())
             }
             fn bind_len(&self) -> usize {
                 let mut count = 0;
