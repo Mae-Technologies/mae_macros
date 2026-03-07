@@ -10,6 +10,19 @@ documentation = "https://docs.rs/mae_macros"
 readme = "README.md"
 keywords = ["macros", "proc-macro", "derive", "microservice", "testing"]
 categories = ["development-tools", "rust-patterns"]
+exclude = [
+    ".cargo",
+    ".ci",
+    ".git-hooks",
+    ".github",
+    ".rust_template_version",
+    "Cargo.lock",
+    "clippy.toml",
+    "deny.toml",
+    "deny.exceptions.toml",
+    "rustfmt.toml",
+    "DEVELOPMENT.md",
+]
 
 [lib]
 proc-macro=true
