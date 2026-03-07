@@ -1,9 +1,27 @@
+//! Internal helper utilities for the `MaeRepo` derive macro.
+//!
+//! These functions inspect a [`DeriveInput`] struct's named fields and emit
+//! the `proc_macro2::TokenStream` bodies for `InsertRow`, `UpdateRow`,
+//! `Field`, and `PatchField` respectively.  They are `pub(crate)` and are
+//! not part of the public API.
+
 use quote::quote;
 use syn::{Data, DataStruct, DeriveInput, Field, Fields, LitStr};
 
 type Body = proc_macro2::TokenStream;
 type BodyIdent = proc_macro2::TokenStream;
 
+/// Generates the `PatchField` typed enum and its trait implementations.
+///
+/// `PatchField` is an enum where each variant carries the field's value type.
+/// Fields marked `#[locked]` or `#[insert_only]` are excluded (they cannot be
+/// patched).
+///
+/// # Returns
+///
+/// `(body, ident_tokens)` where `body` is the full `TokenStream` defining the
+/// `PatchField` enum and its `impl` blocks, and `ident_tokens` is always
+/// `quote! { PatchField }`.
 pub fn to_patches(ast: &DeriveInput,) -> (Body, BodyIdent,) {
     let fields = match &ast.data {
         Data::Struct(DataStruct { fields: Fields::Named(fields,), .. },) => &fields.named,
@@ -137,6 +155,20 @@ pub fn to_patches(ast: &DeriveInput,) -> (Body, BodyIdent,) {
     (body, body_ident,)
 }
 
+/// Generates the `Field` column-name enum and its trait implementations.
+///
+/// `Field` has one variant per named field in the struct, plus an `All` variant
+/// whose `Display` impl emits a comma-separated list of all column names
+/// (suitable for `SELECT <Field::All> FROM …`).
+///
+/// Fields marked `#[locked]` or any other attribute are still included in
+/// `Field` — it covers the full column surface including read-only columns.
+///
+/// # Returns
+///
+/// `(body, ident_tokens)` where `body` is the full `TokenStream` defining the
+/// `Field` enum, `Field::iter()`, and its `impl` blocks, and `ident_tokens` is
+/// always `quote! { Field }`.
 pub fn to_fields(ast: &DeriveInput,) -> (Body, BodyIdent,) {
     let fields = match &ast.data {
         Data::Struct(DataStruct { fields: Fields::Named(fields,), .. },) => &fields.named,
@@ -217,6 +249,28 @@ pub fn to_fields(ast: &DeriveInput,) -> (Body, BodyIdent,) {
     (body, body_ident,)
 }
 
+/// Generates either `InsertRow` or `UpdateRow` and their trait implementations.
+///
+/// Which row type is produced depends on `attr_black_list`:
+///
+/// - Pass `["locked", "update_only"]` to produce **`InsertRow`** — a plain
+///   struct whose fields map 1-to-1 to the writable insert columns.
+/// - Pass `["locked", "insert_only"]` to produce **`UpdateRow`** — a struct
+///   where each field is `Option<T>`; only `Some` variants contribute SQL
+///   `SET` clauses and bound arguments.
+///
+/// Both generated types implement `ToSqlParts`, `BindArgs`, `Debug`, and
+/// `From<RowType> for Vec<FilterOp<Field>>`.
+///
+/// # Arguments
+///
+/// - `ast` — the parsed struct `DeriveInput`.
+/// - `attr_black_list` — list of field-attribute names to skip (as `String`).
+///
+/// # Returns
+///
+/// `(body, ident_tokens)` where `body` is the full generated `TokenStream` and
+/// `ident_tokens` is either `quote! { InsertRow }` or `quote! { UpdateRow }`.
 pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyIdent,) {
     let fields = match &ast.data {
         Data::Struct(DataStruct { fields: Fields::Named(fields,), .. },) => &fields.named,
@@ -387,7 +441,14 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyI
     (body, body_ident,)
 }
 
-// Utils to find various attributes
+// ── Attribute-search utilities ────────────────────────────────────────────────
+
+/// Searches a field's attributes for one matching `attr_name`.
+///
+/// Returns the field's identifier if the attribute is present, or `None`
+/// if either the field is unnamed (tuple field) or the attribute is absent.
+///
+/// Only the attribute path is checked; no arguments are parsed.
 #[allow(dead_code)]
 fn find_get_attr(field: &Field, attr_name: &'static str,) -> Option<syn::Ident,> {
     let Some(ident,) = field.ident.clone() else {
@@ -402,6 +463,16 @@ fn find_get_attr(field: &Field, attr_name: &'static str,) -> Option<syn::Ident,>
 
     None
 }
+
+/// Searches a field's attributes for one matching `attr_name` and parses its
+/// single string-literal argument.
+///
+/// Returns `Ok(Some((ident, value)))` if the attribute is found and its
+/// argument is a valid string literal, `Ok(None)` if the attribute is absent
+/// or the field is unnamed, and `Err` if the argument fails to parse as a
+/// `LitStr`.
+///
+/// Expected attribute form: `#[attr_name("literal value")]`.
 #[allow(dead_code)]
 fn find_get_attr_with_args(
     field: &Field,

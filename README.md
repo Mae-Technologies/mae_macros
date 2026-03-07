@@ -6,6 +6,150 @@ For development rules, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ---
 
+## Macros
+
+- [`#[run_app]`](#run_app) — Actix-Web server setup wrapper
+- [`#[schema]`](#schema) — Postgres schema binding with standard audit columns
+- [`#[schema_root]`](#schema_root) — Like `schema` but without `sys_client` FK
+- [`#[derive(MaeRepo)]`](#maerepo-derive) — SQL helper type generation
+- [`#[mae_test]`](#mae_test) — Async journey test harness
+
+---
+
+## `#[run_app]`
+
+Rewrites a single-expression function body into a complete `async fn run<Context>(…)` Actix-Web server setup.
+
+### What it does
+
+Place `#[run_app]` on a function containing exactly **one** statement — typically a route configuration call. The macro expands it into a full server function that:
+
+- Creates a Redis session store via `app::redis_session`
+- Attaches `TracingLogger`, session middleware, and `web::Data` extractors for `PgPool`, `ApplicationBaseUrl`, `HmacSecret`, and the custom context type
+- Binds the HTTP server to a `TcpListener` and returns a `Result<Server, anyhow::Error>`
+
+### When to use it
+
+Use `#[run_app]` in your service's `main.rs` or `startup.rs` to replace boilerplate Actix-Web server wiring. The annotated function's body becomes the `.service(…)` / `.configure(…)` call chain appended to the generated app.
+
+### Example
+
+```rust,ignore
+use mae_macros::run_app;
+
+#[run_app]
+fn configure(cfg: &mut web::ServiceConfig) {
+    cfg.configure(routes::register)
+}
+// Expands to:
+// async fn run<Context: Clone + Send + 'static>(
+//     listener: TcpListener, db_pool: PgPool, base_url: String,
+//     hmac_secret: SecretString, redis_uri: SecretString, custom_context: Context,
+// ) -> Result<Server, anyhow::Error> { … }
+```
+
+---
+
+## `#[schema]`
+
+Binds a struct to a Postgres schema and injects standard Mae repository columns.
+
+### What it does
+
+`#[schema(CtxType, "schema_name")]` transforms the annotated struct into a full Mae repository by injecting standard audit columns (`id`, `sys_client`, `status`, `comment`, `tags`, `sys_detail`, `created_by`, `updated_by`, `created_at`, `updated_at`) and deriving `MaeRepo`, `sqlx::FromRow`, `serde::Serialize`, `serde::Deserialize`, `Debug`, and `Clone`. It also implements `mae::repo::__private__::Build` with the given schema name.
+
+### When to use it
+
+Use `#[schema]` on every domain repository struct in Mae services. Define only the **domain-specific** fields; all standard columns are injected automatically.
+
+### Example
+
+```rust,ignore
+use mae_macros::schema;
+
+#[schema(AppContext, "public")]
+pub struct UserRepo {
+    pub username: String,
+    pub email: String,
+}
+// Expands to a struct with all standard Mae columns plus `username` and `email`.
+// Also generates InsertRow, UpdateRow, Field, PatchField in the same module.
+```
+
+---
+
+## `#[schema_root]`
+
+Like [`#[schema]`](#schema) but omits the auto-injected `sys_client` foreign-key column.
+
+### What it does
+
+Identical to `#[schema]` in every respect, except the generated struct does **not** include the `sys_client: i32` field. All other standard audit columns are still injected.
+
+### When to use it
+
+Use `#[schema_root]` for the `sys_client` table itself (or any root entity that has no foreign-key back to `sys_client`).
+
+### Example
+
+```rust,ignore
+use mae_macros::schema_root;
+
+#[schema_root(AppContext, "public")]
+pub struct SysClientRepo {
+    pub name: String,
+    pub plan: String,
+}
+// Like #[schema] but without `sys_client: i32`.
+```
+
+---
+
+## `#[derive(MaeRepo)]`
+
+Generates `InsertRow`, `UpdateRow`, `Field`, and `PatchField` types for a repository struct.
+
+### What it does
+
+For each named field in the struct, `MaeRepo` emits:
+
+- **`InsertRow`** — plain struct of all non-`#[locked]`, non-`#[update_only]` fields (used for SQL `INSERT`)
+- **`UpdateRow`** — struct of all non-`#[locked]`, non-`#[insert_only]` fields wrapped in `Option<T>` (used for SQL `UPDATE`; `None` fields are omitted)
+- **`Field`** — enum with one variant per field plus `All`; `Display` impl emits the column name or a comma-separated list for `SELECT`
+- **`PatchField`** — typed enum carrying field values; convertible to `FilterOp<Field>` for partial-update WHERE clauses
+
+### Field attributes
+
+| Attribute | Effect |
+|---|---|
+| `#[locked]` | Excluded from both `InsertRow` and `UpdateRow` (server-managed: `id`, timestamps) |
+| `#[insert_only]` | Excluded from `UpdateRow` only (e.g. `sys_client`) |
+| `#[update_only]` | Excluded from `InsertRow` only |
+
+### When to use it
+
+`MaeRepo` is normally applied indirectly via `#[schema]` or `#[schema_root]`. Use it directly only when you need the generated types on a struct that doesn't follow the standard schema layout.
+
+### Example
+
+```rust,ignore
+use mae_macros::MaeRepo;
+
+#[derive(MaeRepo, Debug, Clone, sqlx::FromRow)]
+pub struct OrderRepo {
+    #[locked]
+    pub id: i32,
+    pub customer_id: i32,
+    pub total: i64,
+}
+// Generates: InsertRow { customer_id, total }
+//            UpdateRow { customer_id: Option<i32>, total: Option<i64> }
+//            Field { All, id, customer_id, total }
+//            PatchField { customer_id(i32), total(i64) }
+```
+
+---
+
 ## `#[mae_test]`
 
 The standard test harness macro for async journey tests in Mae services.

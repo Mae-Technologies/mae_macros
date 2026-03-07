@@ -1,3 +1,28 @@
+//! Procedural macros for Mae-Technologies micro-services.
+//!
+//! This crate provides attribute and derive macros used across the Mae service
+//! ecosystem to reduce boilerplate for Actix-Web app setup, Postgres repository
+//! binding, and async integration testing.
+//!
+//! # Macros
+//!
+//! ## Attribute macros
+//!
+//! - [`run_app`] — rewrites an `async fn run(…)` stub into a complete Actix-Web
+//!   server setup (session middleware, tracing, data extractors, listener binding).
+//! - [`schema`] — binds a struct to a Postgres schema, injecting standard audit
+//!   columns and deriving [`MaeRepo`] plus the required SQL helper types.
+//! - [`schema_root`] — like [`schema`] but omits the `sys_client` foreign-key
+//!   column; used for the root `sys_client` table itself.
+//! - [`mae_test`] — wraps an `async fn` test in a multi-threaded Tokio runtime,
+//!   enforces Mae hygiene rules (no raw `.unwrap()`/`assert*!`), and supports
+//!   optional docker-gating and teardown.
+//!
+//! ## Derive macros
+//!
+//! - [`MaeRepo`] — generates `InsertRow`, `UpdateRow`, `Field`, and `PatchField`
+//!   types for a repository struct, wiring them to the `mae::repo` SQL layer.
+
 #![deny(clippy::disallowed_methods)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
@@ -20,6 +45,40 @@ use syn::{
 mod util;
 use util::*;
 
+/// Rewrites a single-statement function body into a full Actix-Web server setup.
+///
+/// Place `#[run_app]` on a function that contains exactly **one** expression
+/// statement — typically the call chain that configures your Actix-Web
+/// [`App`] routes (e.g. `.configure(routes::register)`). The macro wraps that
+/// statement in a complete `async fn run<Context>(…)` that:
+///
+/// - Creates a Redis session store via `app::redis_session`.
+/// - Attaches `TracingLogger`, session middleware, and standard `web::Data`
+///   extractors (`PgPool`, `ApplicationBaseUrl`, `HmacSecret`, custom context).
+/// - Binds the HTTP server to the supplied `TcpListener`.
+///
+/// # Required imports in calling code
+///
+/// The expanded code references types from `actix_web`, `actix_web::web`,
+/// `actix_files`, `tracing_actix_web::TracingLogger`, `sqlx::PgPool`,
+/// `secrecy::SecretString`, `tokio::net::TcpListener`, and the local `app`
+/// module. Ensure these are in scope at the call site.
+///
+/// # Panics / compile errors
+///
+/// Emits a compile error if the annotated function body is empty (zero
+/// statements).
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use mae_macros::run_app;
+///
+/// #[run_app]
+/// pub fn configure_routes(cfg: &mut web::ServiceConfig) {
+///     cfg.configure(routes::register)
+/// }
+/// ```
 #[proc_macro_attribute]
 pub fn run_app(_: TokenStream, input: TokenStream,) -> TokenStream {
     let input_fn = parse_macro_input!(input as ItemFn);
@@ -69,6 +128,9 @@ pub fn run_app(_: TokenStream, input: TokenStream,) -> TokenStream {
     .into()
 }
 
+/// Parsed arguments shared by `#[schema]` and `#[schema_root]`.
+///
+/// Expected form: `#[schema(CtxType, "schema_name")]`
 struct Args {
     ctx: Ident,
     schema: LitStr,
@@ -81,6 +143,49 @@ impl Parse for Args {
     }
 }
 
+/// Binds a struct to a Postgres schema and injects standard Mae repository columns.
+///
+/// `#[schema(CtxType, "schema_name")]` transforms an annotated struct into a
+/// full Mae repository struct by:
+///
+/// - Injecting standard audit columns: `id`, `sys_client`, `status`, `comment`,
+///   `tags`, `sys_detail`, `created_by`, `updated_by`, `created_at`, `updated_at`.
+/// - Deriving [`MaeRepo`], `sqlx::FromRow`, `serde::Serialize`, `serde::Deserialize`,
+///   `Debug`, and `Clone`.
+/// - Implementing `mae::repo::__private__::Build<CtxType, InsertRow, UpdateRow, Field, PatchField>`
+///   with the given schema name returned from `Build::schema()`.
+///
+/// # Arguments
+///
+/// | Position | Type | Description |
+/// |---|---|---|
+/// | 1st | `Ident` | The context type used by the `mae::repo` build layer (e.g. `AppContext`) |
+/// | 2nd | `LitStr` | Postgres schema name string (e.g. `"public"`) |
+///
+/// # Restrictions
+///
+/// - Must be applied to a struct with **named fields** only. Tuple structs and
+///   enums produce a compile error.
+/// - The struct must not already define the injected standard columns.
+///
+/// # Required imports in calling code
+///
+/// The generated code uses `mae::repo`, `sqlx`, `serde`, `chrono`, and
+/// `serde_json`. These must be available in the calling crate.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use mae_macros::schema;
+///
+/// #[schema(AppContext, "public")]
+/// pub struct UserRepo {
+///     pub username: String,
+///     pub email: String,
+/// }
+/// // Expands to a struct with all standard Mae columns plus `username` and `email`.
+/// // Also emits InsertRow, UpdateRow, Field, PatchField types in the same scope.
+/// ```
 #[proc_macro_attribute]
 pub fn schema(args: TokenStream, input: TokenStream,) -> TokenStream {
     let Args { ctx, schema, .. } = parse_macro_input!(args as Args);
@@ -149,8 +254,32 @@ pub fn schema(args: TokenStream, input: TokenStream,) -> TokenStream {
     repo.into()
 }
 
-/// Like `#[schema]` but omits the auto-injected `sys_client` field.
-/// Use this for the `sys_client` table itself, which has no FK back to itself.
+/// Like [`schema`] but omits the auto-injected `sys_client` field.
+///
+/// Use `#[schema_root]` for the `sys_client` table itself (or any root table
+/// that has no foreign-key back to `sys_client`). All other behaviour is
+/// identical to [`schema`]: standard audit columns are injected, [`MaeRepo`]
+/// is derived, and `Build` is implemented.
+///
+/// # Arguments
+///
+/// Same as [`schema`]: `(CtxType, "schema_name")`.
+///
+/// # Restrictions
+///
+/// Must be applied to a struct with named fields only.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use mae_macros::schema_root;
+///
+/// #[schema_root(AppContext, "public")]
+/// pub struct SysClientRepo {
+///     pub name: String,
+/// }
+/// // Like #[schema] but without the `sys_client: i32` field.
+/// ```
 #[proc_macro_attribute]
 pub fn schema_root(args: TokenStream, input: TokenStream,) -> TokenStream {
     let Args { ctx, schema, .. } = parse_macro_input!(args as Args);
@@ -212,6 +341,51 @@ pub fn schema_root(args: TokenStream, input: TokenStream,) -> TokenStream {
     repo.into()
 }
 
+/// Derives the full Mae repository SQL helper types for a struct.
+///
+/// This derive macro is typically applied indirectly through [`schema`] or
+/// [`schema_root`], but can be used directly on any struct with named fields.
+///
+/// It generates four items in the same scope as the annotated struct:
+///
+/// - **`InsertRow`** — a plain struct containing every non-`#[locked]`,
+///   non-`#[update_only]` field. Used as the input type for SQL `INSERT`.
+/// - **`UpdateRow`** — a struct where every non-`#[locked]`, non-`#[insert_only]`
+///   field is wrapped in `Option<T>`. Only `Some` fields are included in the
+///   generated `SET` clause.
+/// - **`Field`** — an enum with one variant per struct field plus an `All`
+///   variant. Implements `Display` (column name) and `ToSqlParts`.
+/// - **`PatchField`** — a typed enum where each variant carries the field's
+///   value. Used for partial updates and filter construction.
+///
+/// # Field attributes recognised by `MaeRepo`
+///
+/// | Attribute | Effect |
+/// |---|---|
+/// | `#[locked]` | Field excluded from both `InsertRow` and `UpdateRow` (server-managed columns like `id`, `created_at`) |
+/// | `#[insert_only]` | Field excluded from `UpdateRow` only |
+/// | `#[update_only]` | Field excluded from `InsertRow` only |
+///
+/// # Restrictions
+///
+/// - Only structs with named fields are supported; tuple structs and enums
+///   produce a compile error.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use mae_macros::MaeRepo;
+///
+/// #[derive(MaeRepo, Debug, Clone)]
+/// pub struct MyRepo {
+///     #[locked]
+///     pub id: i32,
+///     pub name: String,
+///     pub value: i32,
+/// }
+/// // Generates: InsertRow { name, value }, UpdateRow { name: Option<String>, value: Option<i32> },
+/// //            Field { All, id, name, value }, PatchField { name(String), value(i32) }
+/// ```
 #[proc_macro_derive(MaeRepo, attributes(from_context, insert_only, update_only, locked))]
 pub fn derive_mae_repo(item: TokenStream,) -> TokenStream {
     let ast = parse_macro_input!(item as DeriveInput);
