@@ -41,7 +41,7 @@ use syn::{
     Fields::Named,
     FieldsNamed, Ident, ItemFn, LitStr, Token,
     parse::{Parse, ParseStream},
-    parse_macro_input,
+    parse_macro_input
 };
 
 mod util;
@@ -82,16 +82,16 @@ use util::*;
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn run_app(_: TokenStream, input: TokenStream,) -> TokenStream {
+pub fn run_app(_: TokenStream, input: TokenStream) -> TokenStream {
     let input_fn = parse_macro_input!(input as ItemFn);
 
     // Avoid indexing panic if the function body is empty.
     let fn_block = match input_fn.block.stmts.first() {
-        Some(stmt,) => stmt,
+        Some(stmt) => stmt,
         None => {
             return syn::Error::new_spanned(
                 &input_fn.sig.ident,
-                "run_app requires at least one statement in the function body",
+                "run_app requires at least one statement in the function body"
             )
             .to_compile_error()
             .into();
@@ -137,13 +137,13 @@ pub fn run_app(_: TokenStream, input: TokenStream,) -> TokenStream {
 struct Args {
     ctx: Ident,
     schema: LitStr,
-    _comma: Token![,],
+    _comma: Token![,]
 }
 
 #[doc(hidden)]
 impl Parse for Args {
-    fn parse(input: ParseStream<'_,>,) -> syn::Result<Self,> {
-        Ok(Self { ctx: input.parse()?, _comma: input.parse()?, schema: input.parse()?, },)
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        Ok(Self { ctx: input.parse()?, _comma: input.parse()?, schema: input.parse()? })
     }
 }
 
@@ -191,7 +191,7 @@ impl Parse for Args {
 /// // Also emits InsertRow, UpdateRow, Field, PatchField types in the same scope.
 /// ```
 #[proc_macro_attribute]
-pub fn schema(args: TokenStream, input: TokenStream,) -> TokenStream {
+pub fn schema(args: TokenStream, input: TokenStream) -> TokenStream {
     let Args { ctx, schema, .. } = parse_macro_input!(args as Args);
     let ast = parse_macro_input!(input as DeriveInput);
 
@@ -200,11 +200,11 @@ pub fn schema(args: TokenStream, input: TokenStream,) -> TokenStream {
 
     // confirm the macro is being called on a Struct Type and extract the fields.
     let fields = match ast.data {
-        Struct(DataStruct { fields: Named(FieldsNamed { ref named, .. },), .. },) => named,
+        Struct(DataStruct { fields: Named(FieldsNamed { ref named, .. }), .. }) => named,
         _ => {
             return syn::Error::new_spanned(
                 repo_ident,
-                "schema only works for structs with named fields",
+                "schema only works for structs with named fields"
             )
             .to_compile_error()
             .into();
@@ -220,7 +220,7 @@ pub fn schema(args: TokenStream, input: TokenStream,) -> TokenStream {
             #(#attrs)*
             pub #name: #ty
         }
-    },);
+    });
 
     // rebuild repo struct with the existing fields and default fields for the repo
     // NOTE: here, we are deriving the Repo with the proc_macro_derive fn from above
@@ -285,7 +285,7 @@ pub fn schema(args: TokenStream, input: TokenStream,) -> TokenStream {
 /// // Like #[schema] but without the `sys_client: i32` field.
 /// ```
 #[proc_macro_attribute]
-pub fn schema_root(args: TokenStream, input: TokenStream,) -> TokenStream {
+pub fn schema_root(args: TokenStream, input: TokenStream) -> TokenStream {
     let Args { ctx, schema, .. } = parse_macro_input!(args as Args);
     let ast = parse_macro_input!(input as DeriveInput);
 
@@ -293,11 +293,11 @@ pub fn schema_root(args: TokenStream, input: TokenStream,) -> TokenStream {
     let repo_attrs = &ast.attrs;
 
     let fields = match ast.data {
-        Struct(DataStruct { fields: Named(FieldsNamed { ref named, .. },), .. },) => named,
+        Struct(DataStruct { fields: Named(FieldsNamed { ref named, .. }), .. }) => named,
         _ => {
             return syn::Error::new_spanned(
                 repo_ident,
-                "schema_root only works for structs with named fields",
+                "schema_root only works for structs with named fields"
             )
             .to_compile_error()
             .into();
@@ -312,7 +312,7 @@ pub fn schema_root(args: TokenStream, input: TokenStream,) -> TokenStream {
             #(#attrs)*
             pub #name: #ty
         }
-    },);
+    });
 
     let repo = quote! {
         #(#repo_attrs)*
@@ -392,26 +392,26 @@ pub fn schema_root(args: TokenStream, input: TokenStream,) -> TokenStream {
 /// ```
 #[doc(hidden)]
 #[proc_macro_derive(MaeRepo, attributes(from_context, insert_only, update_only, locked))]
-pub fn derive_mae_repo(item: TokenStream,) -> TokenStream {
+pub fn derive_mae_repo(item: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(item as DeriveInput);
 
     // Making sure it the derive macro is called on a struct;
     let _ = match &ast.data {
-        Struct(DataStruct { fields: Fields::Named(fields,), .. },) => &fields.named,
+        Struct(DataStruct { fields: Fields::Named(fields), .. }) => &fields.named,
         _ => {
             return syn::Error::new_spanned(
                 &ast.ident,
-                "MaeRepo derive expects a struct with named fields",
+                "MaeRepo derive expects a struct with named fields"
             )
             .to_compile_error()
             .into();
         }
     };
 
-    let (insert_row, _,) = to_row(&ast, vec!["locked".into(), "update_only".into()],);
-    let (update_row, _,) = to_row(&ast, vec!["locked".into(), "insert_only".into()],);
-    let (repo_typed, _,) = to_patches(&ast,);
-    let (repo_variant, _,) = to_fields(&ast,);
+    let (insert_row, _) = to_row(&ast, vec!["locked".into(), "update_only".into()]);
+    let (update_row, _) = to_row(&ast, vec!["locked".into(), "insert_only".into()]);
+    let (repo_typed, _) = to_patches(&ast);
+    let (repo_variant, _) = to_fields(&ast);
 
     quote! {
         #repo_variant
@@ -433,11 +433,11 @@ pub fn derive_mae_repo(item: TokenStream,) -> TokenStream {
 /// - `#[mae_test(docker, teardown = path)]`     — both
 struct MaeTestArgs {
     docker: bool,
-    teardown: Option<syn::ExprPath,>,
+    teardown: Option<syn::ExprPath>
 }
 
 impl Parse for MaeTestArgs {
-    fn parse(input: ParseStream<'_,>,) -> syn::Result<Self,> {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let mut docker = false;
         let mut teardown = None;
 
@@ -447,23 +447,23 @@ impl Parse for MaeTestArgs {
                 "docker" => docker = true,
                 "teardown" => {
                     input.parse::<Token![=]>()?;
-                    teardown = Some(input.parse::<syn::ExprPath>()?,);
+                    teardown = Some(input.parse::<syn::ExprPath>()?);
                 }
                 other => {
                     return Err(syn::Error::new_spanned(
                         ident,
                         format!(
                             "unknown #[mae_test] argument: `{other}`; expected `docker` or `teardown = <path>`"
-                        ),
-                    ),);
+                        )
+                    ));
                 }
             }
-            if input.peek(Token![,],) {
+            if input.peek(Token![,]) {
                 let _: Token![,] = input.parse()?;
             }
         }
 
-        Ok(Self { docker, teardown, },)
+        Ok(Self { docker, teardown })
     }
 }
 
@@ -523,15 +523,15 @@ impl Parse for MaeTestArgs {
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn mae_test(attr: TokenStream, item: TokenStream,) -> TokenStream {
-    let MaeTestArgs { docker, teardown, } = parse_macro_input!(attr as MaeTestArgs);
+pub fn mae_test(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let MaeTestArgs { docker, teardown } = parse_macro_input!(attr as MaeTestArgs);
 
-    let mut f = match syn::parse::<syn::ItemFn,>(item,) {
-        Ok(f,) => f,
-        Err(_,) => {
+    let mut f = match syn::parse::<syn::ItemFn>(item) {
+        Ok(f) => f,
+        Err(_) => {
             return syn::Error::new(
                 proc_macro2::Span::call_site(),
-                "#[mae_test] can only be applied to a function",
+                "#[mae_test] can only be applied to a function"
             )
             .to_compile_error()
             .into();
@@ -542,7 +542,7 @@ pub fn mae_test(attr: TokenStream, item: TokenStream,) -> TokenStream {
     if !f.sig.inputs.is_empty() {
         return syn::Error::new_spanned(
             &f.sig.inputs,
-            "#[mae_test] test functions must not take arguments",
+            "#[mae_test] test functions must not take arguments"
         )
         .to_compile_error()
         .into();
@@ -560,10 +560,10 @@ pub fn mae_test(attr: TokenStream, item: TokenStream,) -> TokenStream {
         ".unwrap",    // Result::unwrap / Option::unwrap
         "assert!",    // assert!
         "assert_eq!", // assert_eq!
-        "assert_ne!", // assert_ne!
+        "assert_ne!"  // assert_ne!
     ];
 
-    if forbidden.iter().any(|pat| body_s.contains(pat,),) {
+    if forbidden.iter().any(|pat| body_s.contains(pat)) {
         return syn::Error::new_spanned(
             &orig_block,
             "#[mae_test] forbids assert*/unwrap/expect in test bodies; use must::* helpers or return Result and use `?`",
@@ -575,7 +575,7 @@ pub fn mae_test(attr: TokenStream, item: TokenStream,) -> TokenStream {
     // Extract return type as a Type.
     let ret_ty: syn::Type = match &f.sig.output {
         syn::ReturnType::Default => syn::parse_quote!(()),
-        syn::ReturnType::Type(_, ty,) => (**ty).clone(),
+        syn::ReturnType::Type(_, ty) => (**ty).clone()
     };
 
     // ---- docker gate: skip unless MAE_TESTCONTAINERS=1 was set at compile time ----
@@ -584,7 +584,7 @@ pub fn mae_test(attr: TokenStream, item: TokenStream,) -> TokenStream {
         // Generate early-return based on whether the function returns () or a Result/other type.
         let early_return: proc_macro2::TokenStream = match &f.sig.output {
             syn::ReturnType::Default => quote! { return; },
-            syn::ReturnType::Type(..,) => {
+            syn::ReturnType::Type(..) => {
                 // For Result<(), E> (the common case) this expands to Ok(()).
                 // Requires the success type to implement Default; document this constraint.
                 quote! { return ::core::result::Result::Ok(::core::default::Default::default()); }
@@ -602,7 +602,7 @@ pub fn mae_test(attr: TokenStream, item: TokenStream,) -> TokenStream {
 
     // ---- optional teardown call ----
     let teardown_call = match teardown {
-        Some(ref td_path,) => quote! {
+        Some(ref td_path) => quote! {
             let __teardown_result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
                 __mae_rt.block_on(async move {
                     #td_path().await;
@@ -611,14 +611,14 @@ pub fn mae_test(attr: TokenStream, item: TokenStream,) -> TokenStream {
         },
         None => quote! {
             let __teardown_result: ::std::result::Result<(), Box<dyn ::std::any::Any + Send>> = Ok(());
-        },
+        }
     };
 
     // Ensure the outer test function is synchronous; we drive an async block ourselves.
     f.sig.asyncness = None;
 
     // Outer test function gets ONLY #[test] (plus any attrs the user already had, e.g. #[ignore]).
-    f.attrs.insert(0, syn::parse_quote!(#[test]),);
+    f.attrs.insert(0, syn::parse_quote!(#[test]));
 
     // Generate body.
     //
@@ -666,5 +666,5 @@ pub fn mae_test(attr: TokenStream, item: TokenStream,) -> TokenStream {
         __mae_run_test()
     });
 
-    TokenStream::from(quote::quote!(#f),)
+    TokenStream::from(quote::quote!(#f))
 }
