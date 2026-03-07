@@ -9,7 +9,7 @@ use_small_heuristics = "Max"
 newline_style = "Unix"
 
 # Add trailing commas where possible
-trailing_comma = "Always"
+trailing_comma = "Never"
 
 # Force rustfmt to normalize comments
 normalize_comments = true

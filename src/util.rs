@@ -1,17 +1,36 @@
+//! Internal helper utilities for the `MaeRepo` derive macro.
+//!
+//! These functions inspect a [`DeriveInput`] struct's named fields and emit
+//! the `proc_macro2::TokenStream` bodies for `InsertRow`, `UpdateRow`,
+//! `Field`, and `PatchField` respectively.  They are `pub(crate)` and are
+//! not part of the public API.
+
 use quote::quote;
 use syn::{Data, DataStruct, DeriveInput, Field, Fields, LitStr};
 
 type Body = proc_macro2::TokenStream;
 type BodyIdent = proc_macro2::TokenStream;
 
-pub fn to_patches(ast: &DeriveInput,) -> (Body, BodyIdent,) {
+/// Generates the `PatchField` typed enum and its trait implementations.
+///
+/// `PatchField` is an enum where each variant carries the field's value type.
+/// Fields marked `#[locked]` or `#[insert_only]` are excluded (they cannot be
+/// patched).
+///
+/// # Returns
+///
+/// `(body, ident_tokens)` where `body` is the full `TokenStream` defining the
+/// `PatchField` enum and its `impl` blocks, and `ident_tokens` is always
+/// `quote! { PatchField }`.
+#[doc(hidden)]
+pub fn to_patches(ast: &DeriveInput) -> (Body, BodyIdent) {
     let fields = match &ast.data {
-        Data::Struct(DataStruct { fields: Fields::Named(fields,), .. },) => &fields.named,
+        Data::Struct(DataStruct { fields: Fields::Named(fields), .. }) => &fields.named,
         _ => {
             return (
-                syn::Error::new_spanned(&ast.ident, "expected a struct with named fields",)
+                syn::Error::new_spanned(&ast.ident, "expected a struct with named fields")
                     .to_compile_error(),
-                quote! { PatchField },
+                quote! { PatchField }
             );
         }
     };
@@ -26,44 +45,44 @@ pub fn to_patches(ast: &DeriveInput,) -> (Body, BodyIdent,) {
 
     fields.iter().for_each(|f| {
         let name_ident = f.ident.as_ref().ok_or_else(|| {
-            syn::Error::new_spanned(&ast.ident, "missing a name field (missing ident.)",)
+            syn::Error::new_spanned(&ast.ident, "missing a name field (missing ident.)")
                 .to_compile_error()
-        },);
+        });
 
         // we need to check if either there are no attrs, or if attr != locked | != insert_only
-        if let Ok(name_ident,) = name_ident
+        if let Ok(name_ident) = name_ident
             && f.attrs
                 .iter()
-                .all(|a| !a.path().is_ident("locked",) && !a.path().is_ident("insert_only",),)
+                .all(|a| !a.path().is_ident("locked") && !a.path().is_ident("insert_only"))
         {
             let ty = &f.ty;
             let name_str = name_ident.to_string();
 
             to_arg.push(quote! {
                 #body_ident::#name_ident(arg) => args.add(arg)
-            },);
+            });
             to_string.push(quote! {
                 #body_ident::#name_ident(_) => #name_str.to_string()
-            },);
+            });
 
             debug_bindings.push(quote! {
                 #body_ident::#name_ident(b) => write!(f, "{:?}", b)
-            },);
+            });
 
-            typed_enum.push(quote! { #name_ident(#ty) },);
+            typed_enum.push(quote! { #name_ident(#ty) });
 
             patch_to_field_arms.push(quote! {
                 #body_ident::#name_ident(_) => Field::#name_ident
-            },);
+            });
 
             patch_to_filter_arms.push(quote! {
                 #body_ident::#name_ident(v) => mae::repo::filter::FilterOp::Begin(
                     Field::#name_ident,
                     v.into_mae_filter(),
                 )
-            },);
+            });
         }
-    },);
+    });
 
     let body = quote! {
         #[allow(non_snake_case, non_camel_case_types, nonstandard_style)]
@@ -134,50 +153,65 @@ pub fn to_patches(ast: &DeriveInput,) -> (Body, BodyIdent,) {
             }
         }
     };
-    (body, body_ident,)
+    (body, body_ident)
 }
 
-pub fn to_fields(ast: &DeriveInput,) -> (Body, BodyIdent,) {
+/// Generates the `Field` column-name enum and its trait implementations.
+///
+/// `Field` has one variant per named field in the struct, plus an `All` variant
+/// whose `Display` impl emits a comma-separated list of all column names
+/// (suitable for `SELECT <Field::All> FROM …`).
+///
+/// Fields marked `#[locked]` or any other attribute are still included in
+/// `Field` — it covers the full column surface including read-only columns.
+///
+/// # Returns
+///
+/// `(body, ident_tokens)` where `body` is the full `TokenStream` defining the
+/// `Field` enum, `Field::iter()`, and its `impl` blocks, and `ident_tokens` is
+/// always `quote! { Field }`.
+#[doc(hidden)]
+pub fn to_fields(ast: &DeriveInput) -> (Body, BodyIdent) {
     let fields = match &ast.data {
-        Data::Struct(DataStruct { fields: Fields::Named(fields,), .. },) => &fields.named,
+        Data::Struct(DataStruct { fields: Fields::Named(fields), .. }) => &fields.named,
         _ => {
             return (
-                syn::Error::new_spanned(&ast.ident, "expected a struct with named fields",)
+                syn::Error::new_spanned(&ast.ident, "expected a struct with named fields")
                     .to_compile_error(),
-                quote! { Field },
+                quote! { Field }
             );
         }
     };
 
-    let mut all_cols: Vec<String,> = Vec::new();
-    let mut to_string_arms: Vec<proc_macro2::TokenStream,> = Vec::new();
-    let mut variants: Vec<proc_macro2::TokenStream,> = Vec::new();
-    let mut iter_variants: Vec<proc_macro2::TokenStream,> = Vec::new();
+    let mut all_cols: Vec<String> = Vec::new();
+    let mut to_string_arms: Vec<proc_macro2::TokenStream> = Vec::new();
+    let mut variants: Vec<proc_macro2::TokenStream> = Vec::new();
+    let mut iter_variants: Vec<proc_macro2::TokenStream> = Vec::new();
 
     let body_ident = quote! { Field };
 
     for f in fields.iter() {
-        let Some(name,) = f.ident.as_ref() else {
+        let Some(name) = f.ident.as_ref() else {
             variants.push(
-                syn::Error::new_spanned(f, "expected a named field (missing ident)",)
-                    .to_compile_error(),
+                syn::Error::new_spanned(f, "expected a named field (missing ident)")
+                    .to_compile_error()
             );
             continue;
         };
 
         let name_str = name.to_string();
 
-        all_cols.push(name_str.clone(),);
+        all_cols.push(name_str.clone());
 
         to_string_arms.push(quote! {
             #body_ident::#name => #name_str.to_string()
-        },);
+        });
 
-        variants.push(quote! { #name },);
-        iter_variants.push(quote! { #body_ident::#name },);
+        variants.push(quote! { #name });
+        iter_variants.push(quote! { #body_ident::#name });
     }
 
-    let all_cols_str = all_cols.join(", ",);
+    let all_cols_str = all_cols.join(", ");
 
     let body = quote! {
         #[allow(non_snake_case, non_camel_case_types, nonstandard_style)]
@@ -214,22 +248,45 @@ pub fn to_fields(ast: &DeriveInput,) -> (Body, BodyIdent,) {
         }
     };
 
-    (body, body_ident,)
+    (body, body_ident)
 }
 
-pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyIdent,) {
+/// Generates either `InsertRow` or `UpdateRow` and their trait implementations.
+///
+/// Which row type is produced depends on `attr_black_list`:
+///
+/// - Pass `["locked", "update_only"]` to produce **`InsertRow`** — a plain
+///   struct whose fields map 1-to-1 to the writable insert columns.
+/// - Pass `["locked", "insert_only"]` to produce **`UpdateRow`** — a struct
+///   where each field is `Option<T>`; only `Some` variants contribute SQL
+///   `SET` clauses and bound arguments.
+///
+/// Both generated types implement `ToSqlParts`, `BindArgs`, `Debug`, and
+/// `From<RowType> for Vec<FilterOp<Field>>`.
+///
+/// # Arguments
+///
+/// - `ast` — the parsed struct `DeriveInput`.
+/// - `attr_black_list` — list of field-attribute names to skip (as `String`).
+///
+/// # Returns
+///
+/// `(body, ident_tokens)` where `body` is the full generated `TokenStream` and
+/// `ident_tokens` is either `quote! { InsertRow }` or `quote! { UpdateRow }`.
+#[doc(hidden)]
+pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String>) -> (Body, BodyIdent) {
     let fields = match &ast.data {
-        Data::Struct(DataStruct { fields: Fields::Named(fields,), .. },) => &fields.named,
+        Data::Struct(DataStruct { fields: Fields::Named(fields), .. }) => &fields.named,
         _ => {
             return (
-                syn::Error::new_spanned(&ast.ident, "expected a struct with named fields",)
+                syn::Error::new_spanned(&ast.ident, "expected a struct with named fields")
                     .to_compile_error(),
-                quote! { Row },
+                quote! { Row }
             );
         }
     };
 
-    let is_insert_row = attr_black_list.contains(&"update_only".to_string(),);
+    let is_insert_row = attr_black_list.contains(&"update_only".to_string());
     let _is_update_row = !is_insert_row;
 
     let body_ident = if is_insert_row {
@@ -384,41 +441,60 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyI
             }
         }
     };
-    (body, body_ident,)
+    (body, body_ident)
 }
 
-// Utils to find various attributes
+// ── Attribute-search utilities ────────────────────────────────────────────────
+
+/// Searches a field's attributes for one matching `attr_name`.
+///
+/// Returns the field's identifier if the attribute is present, or `None`
+/// if either the field is unnamed (tuple field) or the attribute is absent.
+///
+/// Only the attribute path is checked; no arguments are parsed.
+#[doc(hidden)]
 #[allow(dead_code)]
-fn find_get_attr(field: &Field, attr_name: &'static str,) -> Option<syn::Ident,> {
-    let Some(ident,) = field.ident.clone() else {
+fn find_get_attr(field: &Field, attr_name: &'static str) -> Option<syn::Ident> {
+    let Some(ident) = field.ident.clone() else {
         return None; // ignore tuple fields
     };
 
     for attr in &field.attrs {
-        if attr.path().is_ident(attr_name,) {
-            return Some(ident,);
+        if attr.path().is_ident(attr_name) {
+            return Some(ident);
         }
     }
 
     None
 }
+
+/// Searches a field's attributes for one matching `attr_name` and parses its
+/// single string-literal argument.
+///
+/// Returns `Ok(Some((ident, value)))` if the attribute is found and its
+/// argument is a valid string literal, `Ok(None)` if the attribute is absent
+/// or the field is unnamed, and `Err` if the argument fails to parse as a
+/// `LitStr`.
+///
+/// Expected attribute form: `#[attr_name("literal value")]`.
+#[doc(hidden)]
 #[allow(dead_code)]
 fn find_get_attr_with_args(
     field: &Field,
-    attr_name: &'static str,
-) -> Result<Option<(syn::Ident, String,),>, syn::Error,> {
-    let Some(ident,) = field.ident.clone() else {
-        return Ok(None,); // ignore tuple fields
+    attr_name: &'static str
+) -> Result<Option<(syn::Ident, String)>, syn::Error> {
+    let Some(ident) = field.ident.clone() else {
+        return Ok(None); // ignore tuple fields
     };
 
     for attr in &field.attrs {
-        if attr.path().is_ident(attr_name,) {
+        if attr.path().is_ident(attr_name) {
             let lit: LitStr = attr.parse_args().map_err(|_| {
-                syn::Error::new_spanned(attr, format!("expected #[{}(\"...\")]", attr_name),)
-            },)?;
-            return Ok(Some((ident, lit.value(),),),);
+                syn::Error::new_spanned(attr, format!("expected #[{}(\"...\")]", attr_name))
+            })?;
+            return Ok(Some((ident, lit.value())));
         }
     }
 
-    Ok(None,)
+    Ok(None)
 }

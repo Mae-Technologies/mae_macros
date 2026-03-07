@@ -3,6 +3,26 @@ name = "mae_macros"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+description = "Procedural macros for Mae-Technologies micro-services — derive helpers, schema binding, and async test harness."
+homepage = "https://github.com/Mae-Technologies/mae_macros"
+repository = "https://github.com/Mae-Technologies/mae_macros"
+documentation = "https://docs.rs/mae_macros"
+readme = "README.md"
+keywords = ["macros", "proc-macro", "derive", "microservice", "testing"]
+categories = ["development-tools", "rust-patterns"]
+exclude = [
+    ".cargo",
+    ".ci",
+    ".git-hooks",
+    ".github",
+    ".rust_template_version",
+    "Cargo.lock",
+    "clippy.toml",
+    "deny.toml",
+    "deny.exceptions.toml",
+    "rustfmt.toml",
+    "DEVELOPMENT.md",
+]
 
 [lib]
 proc-macro=true
@@ -14,3 +34,10 @@ proc-macro2 = "1.0.95"
 quote = "1.0.40"
 serde_json = "1.0.140"
 syn = { version = "2.0.104", features = ["full"] }
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"

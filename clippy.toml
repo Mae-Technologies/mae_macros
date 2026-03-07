@@ -1,12 +1,8 @@
-# Ban certain dangerous methods
-disallowed-methods = [
-  { path = "std::option::Option::unwrap", reason = "Use explicit handling" },
-  { path = "std::option::Option::expect", reason = "Use explicit handling" },
-  { path = "std::result::Result::unwrap", reason = "Use ? or match instead" },
-  { path = "std::result::Result::expect", reason = "Use ? or match instead" },
-]
-
-# NOTE: This doesn't work
-# Enable pedantic lints for stricter enforcement
-# Optional: enforce unsafe block comments
-# warn = ["clippy::pedantic", "clippy::undocumented_unsafe_blocks"]
+# Dangerous method enforcement (unwrap/expect):
+# We use clippy::unwrap_used / clippy::expect_used (configured per-crate in Cargo.toml [lints.clippy])
+# INSTEAD of disallowed-methods, because disallowed-methods fires on external macro expansions —
+# including serde_json::json!, which uses .unwrap() internally for OOM-only error handling.
+# clippy::unwrap_used only fires on user-written code, so serde_json::json! is safe to use freely.
+# Tests are exempt via allow-unwrap-in-tests below.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
