@@ -4,6 +4,8 @@
 //! ecosystem to reduce boilerplate for Actix-Web app setup, Postgres repository
 //! binding, and async integration testing.
 //!
+//! see the [Mae library](https://crates.io/crates/mae) for more details.
+//!
 //! # Macros
 //!
 //! ## Attribute macros
@@ -49,7 +51,7 @@ use util::*;
 ///
 /// Place `#[run_app]` on a function that contains exactly **one** expression
 /// statement — typically the call chain that configures your Actix-Web
-/// [`App`] routes (e.g. `.configure(routes::register)`). The macro wraps that
+/// \[`App`\] routes (e.g. `.configure(routes::register)`). The macro wraps that
 /// statement in a complete `async fn run<Context>(…)` that:
 ///
 /// - Creates a Redis session store via `app::redis_session`.
@@ -131,12 +133,14 @@ pub fn run_app(_: TokenStream, input: TokenStream,) -> TokenStream {
 /// Parsed arguments shared by `#[schema]` and `#[schema_root]`.
 ///
 /// Expected form: `#[schema(CtxType, "schema_name")]`
+#[doc(hidden)]
 struct Args {
     ctx: Ident,
     schema: LitStr,
     _comma: Token![,],
 }
 
+#[doc(hidden)]
 impl Parse for Args {
     fn parse(input: ParseStream<'_,>,) -> syn::Result<Self,> {
         Ok(Self { ctx: input.parse()?, _comma: input.parse()?, schema: input.parse()?, },)
@@ -386,6 +390,7 @@ pub fn schema_root(args: TokenStream, input: TokenStream,) -> TokenStream {
 /// // Generates: InsertRow { name, value }, UpdateRow { name: Option<String>, value: Option<i32> },
 /// //            Field { All, id, name, value }, PatchField { name(String), value(i32) }
 /// ```
+#[doc(hidden)]
 #[proc_macro_derive(MaeRepo, attributes(from_context, insert_only, update_only, locked))]
 pub fn derive_mae_repo(item: TokenStream,) -> TokenStream {
     let ast = parse_macro_input!(item as DeriveInput);

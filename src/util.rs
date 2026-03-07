@@ -22,6 +22,7 @@ type BodyIdent = proc_macro2::TokenStream;
 /// `(body, ident_tokens)` where `body` is the full `TokenStream` defining the
 /// `PatchField` enum and its `impl` blocks, and `ident_tokens` is always
 /// `quote! { PatchField }`.
+#[doc(hidden)]
 pub fn to_patches(ast: &DeriveInput,) -> (Body, BodyIdent,) {
     let fields = match &ast.data {
         Data::Struct(DataStruct { fields: Fields::Named(fields,), .. },) => &fields.named,
@@ -169,6 +170,7 @@ pub fn to_patches(ast: &DeriveInput,) -> (Body, BodyIdent,) {
 /// `(body, ident_tokens)` where `body` is the full `TokenStream` defining the
 /// `Field` enum, `Field::iter()`, and its `impl` blocks, and `ident_tokens` is
 /// always `quote! { Field }`.
+#[doc(hidden)]
 pub fn to_fields(ast: &DeriveInput,) -> (Body, BodyIdent,) {
     let fields = match &ast.data {
         Data::Struct(DataStruct { fields: Fields::Named(fields,), .. },) => &fields.named,
@@ -271,6 +273,7 @@ pub fn to_fields(ast: &DeriveInput,) -> (Body, BodyIdent,) {
 ///
 /// `(body, ident_tokens)` where `body` is the full generated `TokenStream` and
 /// `ident_tokens` is either `quote! { InsertRow }` or `quote! { UpdateRow }`.
+#[doc(hidden)]
 pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyIdent,) {
     let fields = match &ast.data {
         Data::Struct(DataStruct { fields: Fields::Named(fields,), .. },) => &fields.named,
@@ -449,6 +452,7 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String,>,) -> (Body, BodyI
 /// if either the field is unnamed (tuple field) or the attribute is absent.
 ///
 /// Only the attribute path is checked; no arguments are parsed.
+#[doc(hidden)]
 #[allow(dead_code)]
 fn find_get_attr(field: &Field, attr_name: &'static str,) -> Option<syn::Ident,> {
     let Some(ident,) = field.ident.clone() else {
@@ -473,6 +477,7 @@ fn find_get_attr(field: &Field, attr_name: &'static str,) -> Option<syn::Ident,>
 /// `LitStr`.
 ///
 /// Expected attribute form: `#[attr_name("literal value")]`.
+#[doc(hidden)]
 #[allow(dead_code)]
 fn find_get_attr_with_args(
     field: &Field,
