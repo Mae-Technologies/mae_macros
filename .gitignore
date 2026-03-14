@@ -50,3 +50,9 @@ docker-container-*
 *.swo
 *.bak
 *.tmp
+
+# -----------------------------
+# Configuration files
+# -----------------------------
+configuration/local.yaml
+configuration/production.yaml
