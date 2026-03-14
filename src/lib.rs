@@ -102,6 +102,7 @@ pub fn run_app(_: TokenStream, input: TokenStream) -> TokenStream {
     async fn run<Context: Clone + Send + 'static>(
         listener: TcpListener,
         db_pool: PgPool,
+        graph_pool: neo4rs::Graph,
         base_url: String,
         hmac_secret: SecretString,
         redis_uri: SecretString,
@@ -119,6 +120,7 @@ pub fn run_app(_: TokenStream, input: TokenStream) -> TokenStream {
                  .app_data(web::Data::new(ApplicationBaseUrl(base_url.clone())))
                  .app_data(web::Data::new(HmacSecret(hmac_secret.clone())))
                  .app_data(web::Data::new(db_pool.clone()))
+                 .app_data(web::Data::new(graph_pool.clone()))
                  .app_data(web::Data::new(custom_context.clone()))
              .#fn_block
          })
