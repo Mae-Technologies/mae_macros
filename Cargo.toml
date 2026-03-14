@@ -1,6 +1,6 @@
 [package]
 name = "mae_macros"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT"
 description = "Procedural macros for Mae-Technologies micro-services — derive helpers, schema binding, and async test harness."
@@ -30,6 +30,7 @@ proc-macro=true
 
 [dependencies]
 chrono = "0.4.41"
+neo4rs = "0.8"
 proc-macro2 = "1.0.95"
 quote = "1.0.40"
 serde_json = "1.0.140"

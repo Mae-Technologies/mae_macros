@@ -11,7 +11,8 @@ allow = [
     "ISC",
     "LicenseRef-Proprietary",
     "MPL-2.0",
-    "Zlib"
+    "Zlib",
+    "CDLA-Permissive-2.0"
 ]
 
 [advisories]
