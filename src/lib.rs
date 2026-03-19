@@ -122,6 +122,9 @@ pub fn run_app(_: TokenStream, input: TokenStream) -> TokenStream {
                  .app_data(web::Data::new(db_pool.clone()))
                  .app_data(web::Data::new(graph_pool.clone()))
                  .app_data(web::Data::new(custom_context.clone()))
+                 .service(mae::health::health)
+                 .service(mae::health::health_pg)
+                 .service(mae::health::health_neo)
              .#fn_block
          })
          .listen(listener)?
