@@ -31,8 +31,8 @@ rust-project.json
 # -----------------------------
 # Docker build artifacts
 docker-compose.override.yml
-Dockerfile.*
-.dockerignore
+# Dockerfile.*
+# .dockerignore
 *.dockerfile
 *.log
 *.pid
@@ -54,5 +54,5 @@ docker-container-*
 # -----------------------------
 # Configuration files
 # -----------------------------
-configuration/local.yaml
 configuration/production.yaml
+configuration/staging.yaml

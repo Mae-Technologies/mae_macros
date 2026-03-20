@@ -144,16 +144,54 @@ Enforces workspace-wide dependency policy:
 
 [read the `cargo-deny` docs](https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html)
 
-### GitHub Actions CI (`.github/workflows/cooked-crab.yaml`)
+### GitHub Actions CI (`.github/workflows/ci.yml`)
 
-Triggers on push/PR to `main` or `master`. Includes:
+Triggers on PR to `main` or `production`. Runs four parallel jobs after **Mission Brief** (config parsing):
 
-- `cargo +nightly fmt -- --check`
-- `cargo +nightly clippy -- -D warnings -D clippy::undocumented_unsafe_blocks`
-- `cargo +nightly miri test`
-- `cargo deny check`
+- **🔐 Secret Scan** — trufflehog scan of the last commit
+- **🦀 Ferris Says No Bugs** — rustfmt, clippy, llvm-cov coverage, cargo-deny
+- **🔌 Connection Check** → **⚙️ Integration Gauntlet** — connectivity probe then integration tests via `bash scripts/int-test.sh --ci`
 
-Optimizes performance by detecting changed `.rs` files and skipping checks when no Rust code is modified.
+Coverage threshold is read from `.ci/ci_env.toml` (`coverage_threshold` key, default 45%).
+
+#### Configuring service-specific secrets
+
+Service-specific host secrets use **standard names** set per-repo by the ansible `k8s-bootstrap` playbook. The CI workflow injects them directly — no declarations needed in `.ci/ci_env.toml`.
+
+`.ci/ci_env.toml` only needs the local dev flags:
+
+```toml
+coverage_threshold = 45
+engine = "nextest"
+env = [
+  "MAE_TESTCONTAINERS=1",
+]
+flags = ["--no-pager", "--features", "integration-testing", "--all-features", "--run-ignored", "all"]
+```
+
+#### Required GitHub Secrets
+
+| Secret | Scope | Set by | Maps to |
+|---|---|---|---|
+| `CI_STAGE_SERVICE_POSTGRES_HOST` | **per-repo** | ansible k8s-bootstrap | `APP_DATABASE__HOST` → `database.host` |
+| `CI_STAGE_SERVICE_NEO4J_HOST` | **per-repo** | ansible k8s-bootstrap | `APP_GRAPHDB__HOST` → `graphdb.host` |
+| `CI_REDIS_URL` | org-global | ansible k8s-bootstrap | `APP_REDIS_URI` → `redis_uri` |
+| `CI_RABBITMQ_HOST` | org-global | ansible k8s-bootstrap | `RABBITMQ_HOST` |
+
+The per-repo secrets are provisioned by running the `ci_staging` tag of the bootstrap playbook:
+
+```bash
+ansible-playbook -i inventories/hosts.ini playbooks/k8s-bootstrap.yml \
+  -e @secrets/k8s-bootstrap.vars.yml --tags ci_staging
+```
+
+> **config-rs env var naming:** prefix `APP`, prefix_separator `_`, separator `__`.
+> `APP_DATABASE__HOST` → strips `APP_` → `database__host` → `database.host`.
+> Flat fields (no `__`): `APP_REDIS_URI` → `redis_uri`.
+
+#### Local development
+
+Running `bash scripts/int-test.sh` (no flags) automatically sets `MAE_TESTCONTAINERS=1` via `.ci/ci_env.toml`, spinning up docker containers for all services. No manual env setup needed.
 
 ## Pre-Push Hook
 
@@ -521,3 +559,35 @@ echo 'alias rust-sync="sync-rust-template --force"' >> ~/.zshrc
 ```
 
 Enjoy consistent, production-grade Rust tooling and integrity checks across all your projects! 🚀
+
+---
+
+## Local Dev with Docker Compose Watch
+
+This template includes a fast local development loop powered by **Docker Compose Watch** and **cargo-watch** inside a dev container.
+
+### How it works
+
+- `Dockerfile.dev` pre-cooks dependencies using **cargo-chef**, so they are cached as a Docker layer and only rebuilt when `Cargo.lock` changes.
+- `scripts/boot.sh` runs **cargo-watch** inside the container, watching `src/` and `Cargo.toml` for changes and automatically triggering an incremental recompile + restart.
+- The `develop.watch` config in your compose file syncs host-side file changes into the running container via **Docker Compose Watch**.
+
+### Starting the dev environment
+
+```bash
+docker compose up --watch
+```
+
+File changes in `src/` are synced into the container automatically. cargo-watch detects the sync and triggers an incremental recompile + restart.
+
+### Expected cycle times
+
+| Change type | Expected time |
+|---|---|
+| Source file (`src/`) | ~5–30s (incremental recompile) |
+| `Cargo.toml` | ~5–30s (incremental recompile) |
+| `Cargo.lock` (dep change) | ~2–5 min (full image rebuild) |
+
+### Syncing dev files to a service repo
+
+`Dockerfile.dev`, `scripts/boot.sh`, and `.dockerignore` are distributed to service repos via `sync-rust-template`. Run it from any service repo root to pick up the latest dev workflow files.
