@@ -117,7 +117,10 @@ pub fn run_app(_: TokenStream, input: TokenStream) -> TokenStream {
                      hmac_secret.clone(),
                      redis_store.clone(),
                  ))
-                .wrap(Cors::default().allowed_origin("*").allowed_methods(vec!["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]).allowed_headers(vec!["*"]))
+                .wrap(Cors::default().allow_any_origin()
+                        .allow_any_method()
+                        .allow_any_header()
+                    )
                  .app_data(web::Data::new(ApplicationBaseUrl(base_url.clone())))
                  .app_data(web::Data::new(HmacSecret(hmac_secret.clone())))
                  .app_data(web::Data::new(db_pool.clone()))
