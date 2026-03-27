@@ -107,6 +107,8 @@ pub fn run_app(_: TokenStream, input: TokenStream) -> TokenStream {
         hmac_secret: SecretString,
         redis_uri: SecretString,
         custom_context: Context,
+        allowed_origin: String,
+        cors_key: String
     ) -> Result<Server, anyhow::Error> {
 
          let redis_store = app::redis_session(redis_uri).await?;
@@ -117,9 +119,10 @@ pub fn run_app(_: TokenStream, input: TokenStream) -> TokenStream {
                      hmac_secret.clone(),
                      redis_store.clone(),
                  ))
-                .wrap(Cors::default().allow_any_origin()
+                .wrap(Cors::default().allowed_origin(&allowed_origin)
                         .allow_any_method()
                         .allow_any_header()
+                        .supports_credentials()
                     )
                  .app_data(web::Data::new(ApplicationBaseUrl(base_url.clone())))
                  .app_data(web::Data::new(HmacSecret(hmac_secret.clone())))
