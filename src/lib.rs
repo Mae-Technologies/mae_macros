@@ -234,7 +234,7 @@ pub fn schema(args: TokenStream, input: TokenStream) -> TokenStream {
     let repo = quote! {
 
         #(#repo_attrs)*
-        #[derive(mae_macros::MaeRepo, Debug, sqlx::FromRow, serde::Serialize, serde::Deserialize, Clone)]
+        #[derive(mae::repo::macros::MaeRepo, Debug, sqlx::FromRow, serde::Serialize, serde::Deserialize, Clone)]
         pub struct #repo_ident {
             #[locked]
             pub id: i32,
@@ -323,7 +323,7 @@ pub fn schema_root(args: TokenStream, input: TokenStream) -> TokenStream {
 
     let repo = quote! {
         #(#repo_attrs)*
-        #[derive(mae_macros::MaeRepo, Debug, sqlx::FromRow, serde::Serialize, serde::Deserialize, Clone)]
+        #[derive(mae::repo::macros::MaeRepo, Debug, sqlx::FromRow, serde::Serialize, serde::Deserialize, Clone)]
         pub struct #repo_ident {
             #[locked]
             pub id: i32,
