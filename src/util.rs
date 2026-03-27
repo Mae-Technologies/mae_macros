@@ -141,12 +141,12 @@ pub fn to_patches(ast: &DeriveInput) -> (Body, BodyIdent) {
         /// Convert a [`PatchField`] variant into a [`FilterOp<Field>`] using an
         /// equality condition (`Begin … Equals / StringIs`).
         ///
-        /// Relies on [`mae::repo::__private__::IntoMaeFilter`] which is
+        /// Relies on [`mae::repo::filter::IntoMaeFilter`] which is
         /// implemented for the primitive types (`i32`, `String`, and their
         /// `Option` wrappers) that appear in schema field definitions.
         impl From<#body_ident> for mae::repo::filter::FilterOp<Field> {
             fn from(patch: #body_ident) -> mae::repo::filter::FilterOp<Field> {
-                use mae::repo::__private__::IntoMaeFilter;
+                use mae::repo::filter::IntoMaeFilter;
                 match patch {
                     #(#patch_to_filter_arms,)*
                 }
@@ -336,7 +336,7 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String>) -> (Body, BodyIde
 
                 row_to_filter_arms.push(quote! {
                     {
-                        use mae::repo::__private__::IntoMaeFilter;
+                        use mae::repo::filter::IntoMaeFilter;
                         let filter = row.#name_ident.clone().into_mae_filter();
                         if out.is_empty() {
                             out.push(mae::repo::filter::FilterOp::Begin(Field::#name_ident, filter,),);
@@ -374,7 +374,7 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String>) -> (Body, BodyIde
 
                 row_to_filter_arms.push(quote! {
                     if let Some(v) = row.#name_ident.clone() {
-                        use mae::repo::__private__::IntoMaeFilter;
+                        use mae::repo::filter::IntoMaeFilter;
                         let filter = v.into_mae_filter();
                         if out.is_empty() {
                             out.push(mae::repo::filter::FilterOp::Begin(Field::#name_ident, filter,),);
