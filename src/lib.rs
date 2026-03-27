@@ -107,8 +107,7 @@ pub fn run_app(_: TokenStream, input: TokenStream) -> TokenStream {
         hmac_secret: SecretString,
         redis_uri: SecretString,
         custom_context: Context,
-        allowed_origin: String,
-        cors_key: String
+        allowed_origin: String
     ) -> Result<Server, anyhow::Error> {
 
          let redis_store = app::redis_session(redis_uri).await?;
