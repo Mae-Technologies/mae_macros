@@ -39,7 +39,7 @@ use syn::{
     Data::Struct,
     DataStruct, DeriveInput,
     Fields::{self, Named},
-    FieldsNamed, ItemFn, LitStr, Path, Token, Type,
+    FieldsNamed, Ident, ItemFn, LitStr, Path, Token, Type,
     parse::{Parse, ParseStream},
     parse_macro_input
 };
@@ -142,7 +142,7 @@ pub fn run_app(_: TokenStream, input: TokenStream) -> TokenStream {
 /// Expected form: `#[schema(CtxType, "schema_name")]`
 #[doc(hidden)]
 struct Args {
-    ctx: LitStr,
+    ctx: Ident,
     schema: LitStr,
     _comma: Token![,]
 }
@@ -202,24 +202,6 @@ pub fn schema(args: TokenStream, input: TokenStream) -> TokenStream {
     let Args { ctx, schema, .. } = parse_macro_input!(args as Args);
     let ast = parse_macro_input!(input as DeriveInput);
 
-    let ctx_path: Path = match ctx.parse() {
-        Ok(path) => path,
-        Err(err) => {
-            return err.to_compile_error().into();
-        }
-    };
-
-    // let ctx_ident = match ctx_path.segments.last() {
-    //     Some(segment) => segment.ident.clone(),
-    //     None => {
-    //         return syn::Error::new_spanned(&ctx_path, "expected a context path")
-    //             .to_compile_error()
-    //             .into();
-    //     }
-    // };
-
-    let ctx_ty: Type = syn::parse_quote!(#ctx_path<'a>);
-
     let repo_ident = &ast.ident;
     let repo_attrs = &ast.attrs;
 
@@ -274,7 +256,7 @@ pub fn schema(args: TokenStream, input: TokenStream) -> TokenStream {
             #[locked]
             pub updated_at: chrono::DateTime<chrono::Utc>,
         }
-        impl<'a> mae::repo::__private__::Build<#ctx_ty, InsertRow, UpdateRow, Field, PatchField> for #repo_ident {
+        impl mae::repo::__private__::Build<#ctx, InsertRow, UpdateRow, Field, PatchField> for #repo_ident {
             fn schema() -> String {
                 #schema.to_string()
             }
