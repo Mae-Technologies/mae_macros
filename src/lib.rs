@@ -39,7 +39,7 @@ use syn::{
     Data::Struct,
     DataStruct, DeriveInput,
     Fields::{self, Named},
-    FieldsNamed, Ident, ItemFn, LitStr, Path, Token, Type,
+    FieldsNamed, Ident, ItemFn, LitStr, Token,
     parse::{Parse, ParseStream},
     parse_macro_input
 };
@@ -110,7 +110,7 @@ pub fn run_app(_: TokenStream, input: TokenStream) -> TokenStream {
         allowed_origin: String
     ) -> Result<Server, anyhow::Error> {
 
-         let redis_store = app::redis_session(redis_uri).await?;
+      let redis_store = app::redis_session(redis_uri).await?;
          let server = HttpServer::new(move || {
              ActixWebApp::new()
                  .wrap(TracingLogger::default())
