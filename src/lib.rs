@@ -114,11 +114,13 @@ pub fn run_app(_: TokenStream, input: TokenStream) -> TokenStream {
          let server = HttpServer::new(move || {
              ActixWebApp::new()
                  .wrap(TracingLogger::default())
+                .wrap(app::cors_middleware(allowed_origin.clone()))
                  .wrap(app::session_middleware(
                      hmac_secret.clone(),
                      redis_store.clone(),
                  ))
-                .wrap(app::cors_middleware(allowed_origin.clone()))
+                .wrap(from_fn(get_session))
+                .wrap(from_fn(get_context::<AppContext>))
                  .app_data(web::Data::new(ApplicationBaseUrl(base_url.clone())))
                  .app_data(web::Data::new(HmacSecret(hmac_secret.clone())))
                  .app_data(web::Data::new(db_pool.clone()))
