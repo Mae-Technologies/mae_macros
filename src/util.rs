@@ -30,7 +30,7 @@ pub fn to_patches(ast: &DeriveInput) -> (Body, BodyIdent) {
             return (
                 syn::Error::new_spanned(&ast.ident, "expected a struct with named fields")
                     .to_compile_error(),
-                quote! { PatchField }
+                quote! { PatchField }.into()
             );
         }
     };
@@ -153,7 +153,7 @@ pub fn to_patches(ast: &DeriveInput) -> (Body, BodyIdent) {
             }
         }
     };
-    (body, body_ident)
+    (body.into(), body_ident.into())
 }
 
 /// Generates the `Field` column-name enum and its trait implementations.
@@ -178,7 +178,7 @@ pub fn to_fields(ast: &DeriveInput) -> (Body, BodyIdent) {
             return (
                 syn::Error::new_spanned(&ast.ident, "expected a struct with named fields")
                     .to_compile_error(),
-                quote! { Field }
+                quote! { Field }.into()
             );
         }
     };
@@ -203,19 +203,23 @@ pub fn to_fields(ast: &DeriveInput) -> (Body, BodyIdent) {
 
         all_cols.push(name_str.clone());
 
-        to_string_arms.push(quote! {
-            #body_ident::#name => #name_str.to_string()
-        });
+        to_string_arms.push(
+            quote! {
+                #body_ident::#name => #name_str.to_string()
+            }
+            .into()
+        );
 
-        variants.push(quote! { #name });
-        iter_variants.push(quote! { #body_ident::#name });
+        variants.push(quote! { #name }.into());
+        iter_variants.push(quote! { #body_ident::#name }.into());
     }
 
     let all_cols_str = all_cols.join(", ");
 
     let body = quote! {
         #[allow(non_snake_case, non_camel_case_types, nonstandard_style)]
-        #[derive(Clone)]
+        #[derive(Clone, serde::Deserialize)]
+        #[serde(rename_all = "snake_case")]
         pub enum #body_ident {
             All,
             #(#variants,)*
@@ -248,7 +252,7 @@ pub fn to_fields(ast: &DeriveInput) -> (Body, BodyIdent) {
         }
     };
 
-    (body, body_ident)
+    (body.into(), body_ident.into())
 }
 
 /// Generates either `InsertRow` or `UpdateRow` and their trait implementations.
@@ -281,13 +285,13 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String>) -> (Body, BodyIde
             return (
                 syn::Error::new_spanned(&ast.ident, "expected a struct with named fields")
                     .to_compile_error(),
-                quote! { Row }
+                quote! { Row }.into()
             );
         }
     };
 
     let is_insert_row = attr_black_list.contains(&"update_only".to_string());
-    let _is_update_row = !is_insert_row;
+    let _is_update_row = !is_insert_row && attr_black_list.contains(&"insert_only".to_string());
 
     let body_ident = if is_insert_row {
         quote! { InsertRow}
@@ -345,7 +349,7 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String>) -> (Body, BodyIde
                         }
                     }
                 },);
-            } else {
+        } else {
                 props.push(quote! { pub #name_ident: Option<#ty> },);
 
                 let name_str = name_ident.to_string();
@@ -441,9 +445,88 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String>) -> (Body, BodyIde
             }
         }
     };
-    (body, body_ident)
+    (body.into(), body_ident.into())
 }
 
+#[doc(hidden)]
+pub fn to_query(ast: &DeriveInput) -> (Body, BodyIdent) {
+    let fields = match &ast.data {
+        Data::Struct(DataStruct { fields: Fields::Named(fields), .. }) => &fields.named,
+        _ => {
+            return (
+                syn::Error::new_spanned(&ast.ident, "expected a struct with named fields")
+                    .to_compile_error(),
+                quote! { Row }.into()
+            );
+        }
+    };
+
+    let body_ident = quote! { QueryRow};
+
+    let mut props = vec![];
+    let mut row_to_filter_arms = vec![];
+
+    fields.iter().for_each(|f| {
+        let name_ident = f.ident.as_ref().ok_or_else(|| {
+            syn::Error::new_spanned(&ast.ident, "missing a name field (missing ident.)")
+                .to_compile_error()
+        });
+
+        if let Ok(name_ident) = name_ident {
+            let ty = &f.ty;
+
+            if f.ident.as_ref().is_some_and(|i| i == "sys_client") {
+                props.push(quote! { pub #name_ident: #ty });
+                row_to_filter_arms.push(quote! {
+                    let filter = row.#name_ident.into_mae_filter();
+                    if out.is_empty() {
+                        out.push(mae::repo::filter::FilterOp::Begin(Field::#name_ident, filter,),);
+                    } else {
+                        out.push(mae::repo::filter::FilterOp::And(Field::#name_ident, filter,),);
+                    }
+            });
+            } else {
+                props.push(quote! { pub #name_ident: Option<#ty> });
+                row_to_filter_arms.push(quote! {
+                if let Some(v) = row.#name_ident.clone() {
+                    let filter = v.into_mae_filter();
+                    if out.is_empty() {
+                        out.push(mae::repo::filter::FilterOp::Begin(Field::#name_ident, filter,),);
+                    } else {
+                        out.push(mae::repo::filter::FilterOp::And(Field::#name_ident, filter,),);
+                    }
+                }
+            });
+            }
+        }
+    });
+
+    let body = quote! {
+        #[allow(non_snake_case, non_camel_case_types, nonstandard_style)]
+        #[derive(Clone, serde::Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        pub struct #body_ident {
+            #(#props,)*
+        }
+        /// Convert a row into a list of [`FilterOp<Field>`] conditions.
+        ///
+        /// For [`InsertRow`] every field becomes a filter condition.
+        /// For [`UpdateRow`] only the `Some` fields are emitted; `None`
+        /// fields are skipped so callers can build partial WHERE clauses.
+        ///
+        /// The first condition uses [`FilterOp::Begin`]; subsequent ones
+        /// use [`FilterOp::And`].
+        impl From<#body_ident> for Vec<mae::repo::filter::FilterOp<Field>> {
+            fn from(row: #body_ident) -> Vec<mae::repo::filter::FilterOp<Field>> {
+                use mae::repo::filter::IntoMaeFilter;
+                let mut out: Vec<mae::repo::filter::FilterOp<Field>> = vec![];
+                #(#row_to_filter_arms)*
+                out
+            }
+        }
+    };
+    (body.into(), body_ident.into())
+}
 // ── Attribute-search utilities ────────────────────────────────────────────────
 
 /// Searches a field's attributes for one matching `attr_name`.

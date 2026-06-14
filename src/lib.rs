@@ -36,12 +36,12 @@ extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
-    Data::Struct,
-    DataStruct, DeriveInput,
-    Fields::{self, Named},
-    FieldsNamed, Ident, ItemFn, LitStr, Token,
     parse::{Parse, ParseStream},
-    parse_macro_input
+    parse_macro_input, Data::Struct,
+    DataStruct,
+    DeriveInput, Fields::{self, Named}, FieldsNamed, Ident, ItemFn,
+    LitStr,
+    Token
 };
 
 mod util;
@@ -126,9 +126,9 @@ pub fn run_app(_: TokenStream, input: TokenStream) -> TokenStream {
                  .app_data(web::Data::new(db_pool.clone()))
                  .app_data(web::Data::new(graph_pool.clone()))
                  .app_data(web::Data::new(custom_context.clone()))
-                 .service(mae::health::health)
-                 .service(mae::health::health_pg)
-                 .service(mae::health::health_neo)
+                 .service(mae::route::health::health)
+                 .service(mae::route::health::health_pg)
+                 .service(mae::route::health::health_neo)
              .#fn_block
          })
          .listen(listener)?
@@ -419,6 +419,7 @@ pub fn derive_mae_repo(item: TokenStream) -> TokenStream {
 
     let (insert_row, _) = to_row(&ast, vec!["locked".into(), "update_only".into()]);
     let (update_row, _) = to_row(&ast, vec!["locked".into(), "insert_only".into()]);
+    let (query_row, _) = to_query(&ast);
     let (repo_typed, _) = to_patches(&ast);
     let (repo_variant, _) = to_fields(&ast);
 
@@ -427,6 +428,7 @@ pub fn derive_mae_repo(item: TokenStream) -> TokenStream {
         #insert_row
         #update_row
         #repo_typed
+        #query_row
     }
     .into()
 }
