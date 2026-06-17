@@ -503,7 +503,7 @@ pub fn to_query(ast: &DeriveInput) -> (Body, BodyIdent) {
 
     let body = quote! {
         #[allow(non_snake_case, non_camel_case_types, nonstandard_style)]
-        #[derive(Clone, serde::Deserialize)]
+        #[derive(Clone, serde::Deserialize, Default)]
         #[serde(rename_all = "snake_case")]
         pub struct #body_ident {
             #(#props,)*
