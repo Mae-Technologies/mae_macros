@@ -4,7 +4,8 @@
 //! ecosystem to reduce boilerplate for Actix-Web app setup, Postgres repository
 //! binding, and async integration testing.
 //!
-//! see the [Mae library](https://crates.io/crates/mae) for more details.
+//! See the [Mae library](https://crates.io/crates/mae) for the runtime framework these
+//! macros target. Macro expansion references `mae` types — add both crates to `Cargo.toml`.
 //!
 //! # Macros
 //!
@@ -36,12 +37,12 @@ extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
+    Data::Struct,
+    DataStruct, DeriveInput,
+    Fields::{self, Named},
+    FieldsNamed, Ident, ItemFn, LitStr, Token,
     parse::{Parse, ParseStream},
-    parse_macro_input, Data::Struct,
-    DataStruct,
-    DeriveInput, Fields::{self, Named}, FieldsNamed, Ident, ItemFn,
-    LitStr,
-    Token
+    parse_macro_input
 };
 
 mod util;

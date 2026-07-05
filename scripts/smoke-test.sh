@@ -73,6 +73,11 @@ done
 info "🦀  Rust quality gate detected — running pre-push checks"
 echo
 
+# rust-toolchain.toml is honored only by rustup's cargo, not distro-packaged cargo.
+if [[ -d "${HOME}/.cargo/bin" ]]; then
+  export PATH="${HOME}/.cargo/bin:${PATH}"
+fi
+
 run() {
   local label="$1"
   shift
@@ -121,7 +126,7 @@ print(d.get('coverage_threshold', ''))
   fi
 fi
 
-run "coverage (≥${COV_THRESHOLD}% lines)" cargo +nightly llvm-cov --lib --fail-under-lines "$COV_THRESHOLD"
+run "coverage (≥${COV_THRESHOLD}% lines)" rustup run nightly cargo llvm-cov --lib --fail-under-lines "$COV_THRESHOLD"
 ok "✔  Coverage threshold met"
 
 ########################################

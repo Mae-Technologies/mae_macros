@@ -30,7 +30,7 @@ pub fn to_patches(ast: &DeriveInput) -> (Body, BodyIdent) {
             return (
                 syn::Error::new_spanned(&ast.ident, "expected a struct with named fields")
                     .to_compile_error(),
-                quote! { PatchField }.into()
+                quote! { PatchField }
             );
         }
     };
@@ -153,7 +153,7 @@ pub fn to_patches(ast: &DeriveInput) -> (Body, BodyIdent) {
             }
         }
     };
-    (body.into(), body_ident.into())
+    (body, body_ident)
 }
 
 /// Generates the `Field` column-name enum and its trait implementations.
@@ -178,7 +178,7 @@ pub fn to_fields(ast: &DeriveInput) -> (Body, BodyIdent) {
             return (
                 syn::Error::new_spanned(&ast.ident, "expected a struct with named fields")
                     .to_compile_error(),
-                quote! { Field }.into()
+                quote! { Field }
             );
         }
     };
@@ -203,15 +203,12 @@ pub fn to_fields(ast: &DeriveInput) -> (Body, BodyIdent) {
 
         all_cols.push(name_str.clone());
 
-        to_string_arms.push(
-            quote! {
-                #body_ident::#name => #name_str.to_string()
-            }
-            .into()
-        );
+        to_string_arms.push(quote! {
+            #body_ident::#name => #name_str.to_string()
+        });
 
-        variants.push(quote! { #name }.into());
-        iter_variants.push(quote! { #body_ident::#name }.into());
+        variants.push(quote! { #name });
+        iter_variants.push(quote! { #body_ident::#name });
     }
 
     let all_cols_str = all_cols.join(", ");
@@ -252,7 +249,7 @@ pub fn to_fields(ast: &DeriveInput) -> (Body, BodyIdent) {
         }
     };
 
-    (body.into(), body_ident.into())
+    (body, body_ident)
 }
 
 /// Generates either `InsertRow` or `UpdateRow` and their trait implementations.
@@ -285,7 +282,7 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String>) -> (Body, BodyIde
             return (
                 syn::Error::new_spanned(&ast.ident, "expected a struct with named fields")
                     .to_compile_error(),
-                quote! { Row }.into()
+                quote! { Row }
             );
         }
     };
@@ -445,7 +442,7 @@ pub fn to_row(ast: &DeriveInput, attr_black_list: Vec<String>) -> (Body, BodyIde
             }
         }
     };
-    (body.into(), body_ident.into())
+    (body, body_ident)
 }
 
 #[doc(hidden)]
@@ -456,7 +453,7 @@ pub fn to_query(ast: &DeriveInput) -> (Body, BodyIdent) {
             return (
                 syn::Error::new_spanned(&ast.ident, "expected a struct with named fields")
                     .to_compile_error(),
-                quote! { Row }.into()
+                quote! { Row }
             );
         }
     };
@@ -525,7 +522,7 @@ pub fn to_query(ast: &DeriveInput) -> (Body, BodyIdent) {
             }
         }
     };
-    (body.into(), body_ident.into())
+    (body, body_ident)
 }
 // ── Attribute-search utilities ────────────────────────────────────────────────
 

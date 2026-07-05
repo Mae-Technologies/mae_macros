@@ -1,6 +1,14 @@
 # mae_macros
 
-Procedural macros for Mae-Technologies services.
+Procedural macros for [Mae-Technologies](https://github.com/Mae-Technologies) micro-services.
+
+Requires the [`mae`](https://crates.io/crates/mae) runtime crate — macros expand into code that calls `mae::app`, `mae::repo`, and `mae::testing` types.
+
+```toml
+[dependencies]
+mae = "0.3"
+mae_macros = "0.1"
+```
 
 For development rules, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
@@ -187,6 +195,10 @@ Rule of thumb: if your test is `async`, use `#[mae_test]`.
 | `teardown = <path>` | Call the given `async fn` after the test body, even on panic |
 
 Arguments can be combined: `#[mae_test(docker, teardown = crate::common::context::teardown)]`
+
+When both `docker` and `teardown` are set, the macro enters a shared container refcount
+guard before your test body so parallel docker-gated tests do not tear down containers
+still in use by siblings.
 
 ---
 
