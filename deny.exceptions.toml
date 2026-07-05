@@ -1,1 +1,3 @@
+# cargo-deny per-crate license exceptions (auto-loaded beside deny.toml).
+# No exceptions currently — this crate's lockfile has no deps outside deny.toml allow-list.
 exceptions = []
