@@ -22,6 +22,5 @@ unmaintained = "workspace"
 multiple-versions="allow"
 
 [sources]
-unused-allowed-source = "allow"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 private = ["https://github.com/MrCartaaa"]
