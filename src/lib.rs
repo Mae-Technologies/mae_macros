@@ -611,6 +611,16 @@ pub fn mae_test(attr: TokenStream, item: TokenStream) -> TokenStream {
         quote! {}
     };
 
+    // When docker + teardown share singleton containers, enter the refcount guard
+    // before the user body so parallel tests do not tear down mid-flight siblings.
+    let docker_guard_enter = if docker && teardown.is_some() {
+        quote! {
+            ::mae::testing::container::docker_test_guard_enter();
+        }
+    } else {
+        quote! {}
+    };
+
     // ---- optional teardown call ----
     let teardown_call = match teardown {
         Some(ref td_path) => quote! {
@@ -652,6 +662,7 @@ pub fn mae_test(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             let __user_result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
                 __mae_rt.block_on(async move {
+                    #docker_guard_enter
                     // run user test body
                     (async move #orig_block).await
                 })
