@@ -130,6 +130,7 @@ pub fn run_app(_: TokenStream, input: TokenStream) -> TokenStream {
                  .service(mae::route::health::health)
                  .service(mae::route::health::health_pg)
                  .service(mae::route::health::health_neo)
+                 .service(mae::route::version::version)
              .#fn_block
          })
          .listen(listener)?
