@@ -17,12 +17,7 @@ allow = [
 
 [advisories]
 unmaintained = "workspace"
-ignore = [
-  # astral-tokio-tar: PAX extraction validation — transitive via testcontainers
-  "RUSTSEC-2026-0066",
-  # rustls-webpki: CRL matching logic — transitive dep, no fix available yet
-  "RUSTSEC-2026-0049",
-]
+ignore = []
 
 [bans]
 multiple-versions="allow"
